@@ -188,7 +188,7 @@ pub async fn launch_instance(
     instance_id: String,
     server: Option<String>,
 ) -> AppResult<()> {
-    let instance = instances::get(&instance_id)?;
+    let mut instance = instances::get(&instance_id)?;
 
     let mut account = accounts::active()?.ok_or(AppError::NoAccount)?;
     if !account.is_offline {
@@ -201,6 +201,20 @@ pub async fn launch_instance(
     let mut detail = minecraft::manifest::fetch_version_detail(&state.http, &entry).await?;
 
     if let Some(kind) = loader_kind_for(&instance.loader) {
+        // Le loader est tenu à jour à chaque lancement : les mods récents refusent de démarrer
+        // avec un loader trop ancien.
+        let wanted = minecraft::loaders::up_to_date_version(
+            &state.http,
+            kind,
+            &instance.mc_version,
+            instance.loader_version.as_deref(),
+        )
+        .await;
+        if wanted.is_some() && wanted != instance.loader_version {
+            instance.loader_version = wanted;
+            instance = instances::update(instance)?;
+        }
+
         let loader_version = instance
             .loader_version
             .clone()
@@ -471,6 +485,11 @@ pub async fn import_instance_code(
 // ---------- Garde-robe ----------
 
 #[tauri::command]
+pub fn list_game_music() -> AppResult<Vec<crate::music::GameTrack>> {
+    crate::music::list()
+}
+
+#[tauri::command]
 pub fn list_wardrobe() -> AppResult<Vec<WardrobeSkin>> {
     skins::list_wardrobe()
 }
@@ -486,10 +505,11 @@ pub async fn apply_wardrobe_skin(state: State<'_, AppState>, id: String) -> AppR
     skins::apply_wardrobe_skin(&state.http, &account, &id).await
 }
 
-/// Instance réservée au serveur officiel (créée à la bonne version si elle n'existe pas encore).
+/// Instance réservée au serveur officiel, créée ou remise à niveau à partir du pack officiel.
+/// L'avancement de l'installation est diffusé par l'événement « share-progress ».
 #[tauri::command]
-pub async fn ensure_official_instance(state: State<'_, AppState>) -> AppResult<Instance> {
-    servers::ensure_official_instance(&state.http).await
+pub async fn ensure_official_instance(app: AppHandle, state: State<'_, AppState>) -> AppResult<Instance> {
+    servers::ensure_official_instance(&app, &state.http).await
 }
 
 /// Analyse des journaux par IA, via le relais (le launcher n'embarque aucune clé d'API).

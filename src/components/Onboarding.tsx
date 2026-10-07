@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import { isValidUsername } from "../lib/format";
-import type { Instance, Server, ServerStatus } from "../lib/types";
+import type { ImportProgress, Instance, Server, ServerStatus } from "../lib/types";
 import { useAccountStore } from "../store/accountStore";
 import { useGameStore } from "../store/gameStore";
 import { useInstanceStore } from "../store/instanceStore";
@@ -41,6 +42,15 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [instance, setInstance] = useState<Instance | null>(null);
   const [server, setServer] = useState<Server | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const [packProgress, setPackProgress] = useState<ImportProgress | null>(null);
+
+  // Avancement de l'installation du pack pendant la création de l'instance.
+  useEffect(() => {
+    const unlisten = listen<ImportProgress>("share-progress", (e) => setPackProgress(e.payload));
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     api
@@ -144,7 +154,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 </h2>
                 <p className="text-text-muted mt-3 leading-relaxed">
                   Une instance, c'est une installation de Minecraft avec sa version et ses mods. On t'en prépare
-                  une, réglée sur la version de {serverName}.
+                  une avec le pack de mods de {serverName} : la bonne version, les mods et les shaders.
                 </p>
               </div>
               <div className="row">
@@ -152,7 +162,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold">{server?.name ?? "Nexora-SMP"}</div>
                   <div className="text-xs text-text-muted">
-                    {status?.online && status.version ? status.version : "Version du serveur"} · créée automatiquement
+                    Version, mods et shaders installés automatiquement
                   </div>
                 </div>
                 <span className="badge badge-accent">Recommandé</span>
@@ -221,7 +231,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             {step === 1 && (
               <button onClick={createInstance} disabled={busy} className="btn btn-primary btn-shine h-11 px-6">
                 {busy ? <Spinner /> : <Icon name="plus" className="w-4 h-4" />}
-                {busy ? "Préparation" : "Créer mon instance"}
+                {busy
+                  ? packProgress && packProgress.total > 0
+                    ? `Installation ${packProgress.done} / ${packProgress.total}`
+                    : "Préparation"
+                  : "Créer mon instance"}
               </button>
             )}
             {step === 2 && (

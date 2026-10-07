@@ -207,7 +207,7 @@ export function ServersPanel() {
                 <div className="flex items-center gap-2 mt-auto">
                   {server.official ? (
                     <span className="flex-1 text-xs text-text-faint leading-snug">
-                      Instance dédiée, créée automatiquement à la version du serveur.
+                      Instance dédiée, installée automatiquement avec le pack de mods du serveur.
                     </span>
                   ) : sortedInstances.length > 0 && instance ? (
                     <Dropdown

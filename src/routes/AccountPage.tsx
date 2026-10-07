@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AccountSkin, AccountSkin3D, SkinCanvas } from "../components/AccountSkin";
+import { CloudAccount } from "../components/CloudAccount";
 import { SkinBrowser } from "../components/SkinBrowser";
 import { Icon, PageHeader, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 import { isValidUsername } from "../lib/format";
 import type { RemoteSkin, WardrobeSkin } from "../lib/types";
 import { useAccountStore } from "../store/accountStore";
+import { useCloudStore } from "../store/cloudStore";
 import { toast } from "../store/toastStore";
 
 export function AccountPage() {
@@ -43,6 +45,8 @@ export function AccountPage() {
       if (activeAccount.is_offline) await loadLocalSkin(activeAccount.uuid);
       else if (applied && list[0]) setRemoteSkin(activeAccount.uuid, { url: list[0].data_uri, variant: list[0].variant });
       toast.success(success);
+      // Compte Nexora connecté : le nouveau skin est aussi publié en ligne.
+      useCloudStore.getState().syncSkin();
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -206,6 +210,7 @@ export function AccountPage() {
 
         {/* Comptes */}
         <aside className="flex flex-col gap-4 lg:sticky lg:top-2">
+          <CloudAccount />
           <section className="card p-5 flex flex-col gap-3">
             <h2 className="section-title">Mes comptes</h2>
             {accounts.length === 0 && <p className="text-xs text-text-muted">Aucun compte pour l'instant.</p>}

@@ -16,10 +16,12 @@ import { ContentPage } from "./routes/ContentPage";
 import { InstanceDetailPage } from "./routes/InstanceDetailPage";
 import { GalleryPage } from "./routes/GalleryPage";
 import { MultiPage } from "./routes/MultiPage";
-import { play } from "./lib/sound";
 import { useAccountStore } from "./store/accountStore";
 import { useBackgroundStore } from "./store/backgroundStore";
+import { useCloudStore } from "./store/cloudStore";
+import { trackLaunch } from "./lib/telemetry";
 import { useGameStore } from "./store/gameStore";
+import { useMusicStore } from "./store/musicStore";
 import { useThemeStore } from "./store/themeStore";
 
 function AppShell() {
@@ -32,15 +34,43 @@ function AppShell() {
     refresh();
   }, [refresh]);
 
-  // Petit son discret sur tout élément cliquable (désactivable dans les réglages).
   useEffect(() => {
-    const onDown = (e: PointerEvent) => {
-      const target = (e.target as Element | null)?.closest?.("button, a, [role='option']");
-      if (target && !(target as HTMLButtonElement).disabled) play("click");
-    };
-    document.addEventListener("pointerdown", onDown, true);
-    return () => document.removeEventListener("pointerdown", onDown, true);
+    trackLaunch();
   }, []);
+
+  // Les musiques viennent des fichiers du jeu : on relit la liste au démarrage, puis à chaque
+  // début et fin de partie (un premier lancement vient de les télécharger).
+  useEffect(() => {
+    useMusicStore.getState().loadTracks();
+  }, [runningId]);
+
+  // Musique d'ambiance : seulement quand la fenêtre du launcher est au premier plan. Elle se coupe
+  // donc quand on passe sur le jeu, et revient si on retourne sur le launcher pendant la partie.
+  useEffect(() => {
+    const update = () => useMusicStore.getState().setAllowed(document.hasFocus());
+    update();
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+
+  // Présence : tant qu'un compte Nexora est connecté, on signale régulièrement aux amis si le
+  // joueur est dans le launcher ou en jeu, et on en profite pour relire leur état.
+  const cloudUser = useCloudStore((s) => s.profile?.id ?? null);
+  const currentServer = useGameStore((s) => s.currentServer);
+  useEffect(() => {
+    if (!cloudUser) return;
+    const beat = () => {
+      const { heartbeat, refreshFriends } = useCloudStore.getState();
+      heartbeat(runningId ? "playing" : "launcher", runningId ? currentServer : null).then(refreshFriends);
+    };
+    beat();
+    const timer = setInterval(beat, 60_000);
+    return () => clearInterval(timer);
+  }, [cloudUser, runningId, currentServer]);
 
   // Transition de page : l'ancienne page joue sa sortie, puis la nouvelle est montée et entre.
   const [displayed, setDisplayed] = useState(location);

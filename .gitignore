@@ -25,3 +25,7 @@ dist-ssr
 
 # Clé du relais IA : ne jamais versionner
 relay/.env
+
+# Musiques personnelles : elles restent sur le PC, seules les musiques du jeu sont utilisées en ligne
+src/assets/music/*
+!src/assets/music/LISEZ-MOI.md

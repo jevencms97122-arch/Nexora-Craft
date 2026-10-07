@@ -59,6 +59,53 @@ pub async fn resolve_recommended_version(
         .ok_or_else(|| AppError::Other(format!("aucune version {kind:?} disponible pour Minecraft {mc_version}")))
 }
 
+/// Vrai si `candidate` est une version strictement plus récente que `current` (comparaison des
+/// nombres séparés par des points ; un suffixe comme « -beta.1 » est ignoré).
+fn is_newer(candidate: &str, current: &str) -> bool {
+    let numbers = |v: &str| -> Vec<u32> {
+        v.split(['-', '+'])
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect()
+    };
+    numbers(candidate) > numbers(current)
+}
+
+/// Version du loader à utiliser au lancement : la dernière version stable si elle est plus récente
+/// que celle de l'instance, sinon celle de l'instance. Fabric et Quilt restent compatibles avec les
+/// anciens mods, alors que les mods récents exigent souvent un loader à jour. Hors ligne, on garde
+/// simplement la version actuelle.
+pub async fn up_to_date_version(
+    client: &reqwest::Client,
+    kind: LoaderKind,
+    mc_version: &str,
+    current: Option<&str>,
+) -> Option<String> {
+    let latest = resolve_recommended_version(client, kind, mc_version).await.ok();
+    match (latest, current) {
+        (Some(latest), Some(current)) if is_newer(&latest, current) => Some(latest),
+        (Some(latest), None) => Some(latest),
+        (_, current) => current.map(String::from),
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::is_newer;
+
+    #[test]
+    fn compares_loader_versions_numerically() {
+        assert!(is_newer("0.19.5", "0.19.3"));
+        assert!(is_newer("0.19.10", "0.19.9"));
+        assert!(is_newer("1.0.0", "0.19.10"));
+        assert!(!is_newer("0.19.3", "0.19.3"));
+        // On ne redescend jamais : une version plus récente que la stable est conservée.
+        assert!(!is_newer("0.19.3", "0.20.0-beta.1"));
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ProfileLibrary {
     name: String,

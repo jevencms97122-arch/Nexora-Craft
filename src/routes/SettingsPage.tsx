@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Icon, PageHeader, Spinner, Toggle, type IconName } from "../components/ui";
+import { Dropdown, Icon, PageHeader, Spinner, Toggle, type IconName } from "../components/ui";
+import { setStatsEnabled, statsEnabled } from "../lib/telemetry";
 import { api } from "../lib/api";
 import type { Settings } from "../lib/types";
 import { useBackgroundStore } from "../store/backgroundStore";
 import { toast } from "../store/toastStore";
+import { RANDOM, useMusicStore, type Repeat } from "../store/musicStore";
 import { useUpdateStore } from "../store/updateStore";
 import { ACCENT_PRESETS, DEFAULT_ACCENT, THEME_PRESETS, hexToHsl, hslToHex, useThemeStore } from "../store/themeStore";
 
@@ -26,6 +28,125 @@ function SettingsSection({ icon, title, description, children }: {
       </div>
       <div className="flex flex-col gap-3 min-w-0">{children}</div>
     </section>
+  );
+}
+
+const REPEAT_OPTIONS: { value: Repeat; label: string; hint: string }[] = [
+  { value: "once", label: "Une seule fois", hint: "Un morceau à l'ouverture du launcher, puis le silence." },
+  { value: "loop", label: "En boucle", hint: "Les morceaux s'enchaînent sans interruption." },
+  { value: "pause", label: "Avec une pause", hint: "Un silence entre deux morceaux, comme dans Minecraft." },
+];
+
+function MusicSettings() {
+  const music = useMusicStore();
+  const TRACKS = music.tracks;
+
+  if (TRACKS.length === 0) {
+    return (
+      <div className="row items-start max-w-md !cursor-default">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium">Pas encore de musique</div>
+          <div className="text-[11px] text-text-faint leading-relaxed mt-0.5">
+            Le launcher joue les musiques de Minecraft, qui se téléchargent avec le jeu. Lance une instance une
+            première fois : elles apparaîtront ici.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-md flex flex-col gap-3">
+      <div className="row items-start">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium">Musique d'ambiance</div>
+          <div className="text-[11px] text-text-faint leading-relaxed mt-0.5">
+            {music.enabled && music.current
+              ? `${music.playing ? "En lecture" : "En pause"} : ${music.current.name}`
+              : "Joue tant que la fenêtre du launcher est au premier plan."}
+          </div>
+        </div>
+        <Toggle checked={music.enabled} onChange={music.setEnabled} label="Musique d'ambiance" />
+      </div>
+
+      {music.enabled && (
+        <>
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="label">Volume</label>
+              <span className="text-xs text-text-muted tabular-nums">{music.volume} %</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={music.volume}
+              onChange={(e) => music.setVolume(Number(e.target.value))}
+              className="w-full accent-[var(--color-accent)]"
+              aria-label="Volume de la musique"
+            />
+          </div>
+
+          <div>
+            <label className="label">Morceau</label>
+            <div className="flex gap-2">
+              <Dropdown
+                className="flex-1 min-w-0"
+                ariaLabel="Choisir le morceau"
+                value={music.track}
+                onChange={music.setTrack}
+                options={[
+                  { value: RANDOM, label: "Aléatoire", hint: "Un morceau différent à chaque fois" },
+                  ...TRACKS.map((t) => ({ value: t.id, label: t.name })),
+                ]}
+              />
+              {music.track === RANDOM && TRACKS.length > 1 && (
+                <button onClick={music.skip} className="btn btn-secondary" title="Jouer un autre morceau maintenant">
+                  <Icon name="refresh" className="w-4 h-4" /> Suivant
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Répétition</label>
+            <div className="flex flex-col gap-2">
+              {REPEAT_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => music.setRepeat(opt.value)}
+                  className={`row items-start text-left ${music.repeat === opt.value ? "!border-accent/50 !bg-accent/5" : ""}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{opt.label}</div>
+                    <div className="text-[11px] text-text-faint leading-relaxed mt-0.5">{opt.hint}</div>
+                  </div>
+                  {music.repeat === opt.value && <Icon name="check" className="w-4 h-4 text-accent mt-0.5" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {music.repeat === "pause" && (
+            <div>
+              <label className="label">Durée de la pause</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={music.pauseMinutes}
+                  onChange={(e) => music.setPauseMinutes(Number(e.target.value))}
+                  className="input w-24"
+                  aria-label="Minutes de pause entre deux morceaux"
+                />
+                <span className="text-sm text-text-muted">minutes entre deux morceaux</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -54,6 +175,7 @@ export function SettingsPage() {
   } = useThemeStore();
 
   const update = useUpdateStore();
+  const [stats, setStats] = useState(statsEnabled);
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -264,10 +386,19 @@ export function SettingsPage() {
               onChange: setWeather,
             },
             {
-              label: "Sons de l'interface",
-              hint: "Petits sons au clic, à la réussite d'une action et au lancement du jeu.",
+              label: "Son de confirmation",
+              hint: "Un petit son quand une action réussit (enregistrement, installation, copie...).",
               checked: sounds,
               onChange: setSounds,
+            },
+            {
+              label: "Statistiques anonymes",
+              hint: "Signale une fois par jour que le launcher a été ouvert, avec sa version. Aucun pseudo ni donnée personnelle.",
+              checked: stats,
+              onChange: (v: boolean) => {
+                setStatsEnabled(v);
+                setStats(v);
+              },
             },
             {
               label: "Animer la scène",
@@ -285,6 +416,14 @@ export function SettingsPage() {
             </div>
           ))}
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon="volume"
+        title="Musique"
+        description="Une musique d'ambiance dans le launcher. Elle se coupe toute seule quand tu passes sur une autre fenêtre (le jeu, par exemple) et reprend à ton retour."
+      >
+        <MusicSettings />
       </SettingsSection>
 
       <SettingsSection

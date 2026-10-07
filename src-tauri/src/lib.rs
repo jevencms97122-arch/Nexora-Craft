@@ -1,6 +1,7 @@
 mod accounts;
 mod ai;
 mod auth;
+mod callback;
 mod commands;
 mod content;
 mod download;
@@ -10,6 +11,7 @@ mod instances;
 mod java;
 mod minecraft;
 mod modrinth;
+mod music;
 mod paths;
 mod screenshots;
 mod servers;
@@ -33,6 +35,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState::default())
+        .setup(|app| {
+            callback::start(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_instances,
             commands::create_instance,
@@ -87,6 +93,7 @@ pub fn run() {
             commands::preview_instance_code,
             commands::import_instance_code,
             commands::list_wardrobe,
+            commands::list_game_music,
             commands::remove_wardrobe_skin,
             commands::apply_wardrobe_skin,
         ])

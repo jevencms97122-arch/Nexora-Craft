@@ -10,14 +10,19 @@ use crate::instances;
 /*
  * Analyse d'un plantage par IA.
  *
- * Le launcher ne contient aucune clé d'API : il envoie les journaux (anonymisés ici) et la
- * configuration de l'instance à un relais, qui est le seul à connaître la clé et à interroger le
- * modèle. Le code du relais est dans le dossier `relay/` du projet.
+ * Le launcher ne contient aucune clé d'API de modèle : il envoie les journaux (anonymisés ici) et
+ * la configuration de l'instance à un relais, qui est le seul à connaître la clé et à interroger
+ * le modèle. Le relais est une fonction Supabase (`supabase/functions/analyze-crash`) ; le dossier
+ * `relay/` contient la même chose en serveur Node, utilisable à la place.
  */
 
 /// Adresse du relais. Peut être remplacée à la compilation par la variable d'environnement
 /// NEXORA_AI_RELAY_URL.
-const DEFAULT_RELAY_URL: &str = "http://92.49.99.59:8787";
+const DEFAULT_RELAY_URL: &str = "https://vmaketngbwbuscynjkac.supabase.co/functions/v1/analyze-crash";
+
+/// Clé publique du projet Supabase (la même que celle de l'interface) : elle identifie le
+/// launcher auprès de la fonction, elle ne donne accès à aucun secret.
+const RELAY_PUBLIC_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZtYWtldG5nYndidXNjeW5qa2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNDY5NjIsImV4cCI6MjEwNjkyMjk2Mn0.eaDQtvOl9xNibvvYvjM2JFiL8AD96OyNj4LIHP4hEyA";
 
 const MAX_LINES: usize = 250;
 const MAX_LINE_CHARS: usize = 400;
@@ -125,6 +130,8 @@ pub async fn analyze(client: &reqwest::Client, instance_id: Option<&str>, logs: 
     let res = client
         .post(format!("{}/analyze", relay_url().trim_end_matches('/')))
         .timeout(Duration::from_secs(75))
+        .bearer_auth(RELAY_PUBLIC_KEY)
+        .header("apikey", RELAY_PUBLIC_KEY)
         .json(&body)
         .send()
         .await

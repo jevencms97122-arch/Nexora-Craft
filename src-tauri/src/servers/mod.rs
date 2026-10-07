@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::instances::{self, Instance, Loader, NewInstance};
+use crate::instances::{self, Instance, NewInstance};
 use crate::paths;
 
 const DEFAULT_PORT: u16 = 25565;
@@ -16,8 +16,11 @@ const PING_TIMEOUT: Duration = Duration::from_secs(4);
 const OFFICIAL_ID: &str = "nexora-smp";
 const OFFICIAL_NAME: &str = "Nexora-SMP";
 const OFFICIAL_ADDRESS: &str = "92.49.99.59:25565";
-/// Version utilisée pour l'instance dédiée si le serveur ne répond pas au moment de la créer.
-const OFFICIAL_FALLBACK_VERSION: &str = "1.21.8";
+/// Pack officiel du serveur, sous forme de code de partage (version, loader, mods et shaders).
+/// L'instance « Nexora-SMP » est créée à partir de lui. Pour publier un nouveau pack : génère un
+/// code depuis une instance (« Partager par code ») et remplace celui-ci ; les instances déjà
+/// créées se mettent à niveau à la connexion suivante.
+const OFFICIAL_PACK_CODE: &str = "NXC1-VEVTVCBGYWJyaWMKMS4yMS4xMXxmYWJyaWN8MC4xOS4zCm06VmE4UEpCRlg6ZTVaUEtmWTcKbTpBQU5vYmJNSTpSQjdDRGpUUwptOnVYWGl6RklzOklpMGdQM0Q4Cm06OXM2b3NtNWc6eHVYNDBUTjUKbToxZUFvbzJLUjpwSFdEdzNWYwptOlA3ZFI4bVNIOjZxQXVUdExSCnM6SFZubU14SDE6QnFlbjFtSlgKczpFcFFGanpyUTpLY2ZRYU41SgpzOml6c0lQSTdhOnBnYjBKam9OCnM6NnVKQ2ZpQ0g6cmNyOTBlUlAKczpMVHZmNVRqaTo2blpOejQ2aApzOlp2TXRRbGhvOmtDMlk4cTFQCm06NVp3ZGNSY2k6NEV3aHNUdTcKbTpndlFxQlVxWjpPdzd3QTBrRwpzOlI2TkV6QXdqOkIxa3lmb1VaCm06WUw1N3hxOVU6a2E5UERsc04";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Server {
@@ -247,66 +250,83 @@ fn dedicated_file() -> std::path::PathBuf {
     paths::app_data_dir().join("official-instance.json")
 }
 
-/// Extrait la version de Minecraft du nom annoncé par le serveur (« Paper 1.21.8 » -> « 1.21.8 »).
-/// Si plusieurs versions sont annoncées (proxy), la dernière citée est retenue.
-fn version_from_brand(brand: &str) -> Option<String> {
-    brand
-        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .map(|token| token.trim_matches('.'))
-        .filter(|token| token.contains('.') && token.starts_with(|c: char| c.is_ascii_digit()))
-        .last()
-        .map(String::from)
+/// Ce que le launcher retient de l'instance dédiée : laquelle, et quel pack y est installé.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Dedicated {
+    instance_id: String,
+    /// Code du pack entièrement installé ; absent si une installation a été incomplète.
+    #[serde(default)]
+    pack_code: Option<String>,
 }
 
-/// Version de Minecraft à utiliser pour rejoindre le serveur officiel : celle qu'il annonce,
-/// si elle existe bien chez Mojang, sinon la version de secours.
-async fn official_version(client: &reqwest::Client) -> String {
-    let announced = version_from_brand(&ping(OFFICIAL_ADDRESS).await.version);
-    if let Some(version) = announced {
-        if crate::minecraft::find_version_entry(client, &version).await.is_ok() {
-            return version;
-        }
-    }
-    OFFICIAL_FALLBACK_VERSION.to_string()
+fn load_dedicated() -> Option<Dedicated> {
+    let data = fs::read_to_string(dedicated_file()).ok()?;
+    // Ancien format : l'identifiant seul, du temps où l'instance était en vanilla.
+    serde_json::from_str::<Dedicated>(&data).ok().or_else(|| {
+        serde_json::from_str::<String>(&data).ok().map(|instance_id| Dedicated { instance_id, pack_code: None })
+    })
 }
 
-/// Retourne l'instance réservée au serveur officiel, en la créant au premier appel. Elle est
-/// toujours à la version du serveur : s'il a été mis à jour, l'instance suit.
-pub async fn ensure_official_instance(client: &reqwest::Client) -> AppResult<Instance> {
-    let version = official_version(client).await;
+/// Retourne l'instance réservée au serveur officiel, en la créant au premier appel à partir du
+/// pack officiel (version, loader, mods, shaders). Si le pack a changé depuis, ou si une
+/// installation précédente était incomplète, l'instance existante est remise à niveau.
+pub async fn ensure_official_instance(app: &tauri::AppHandle, client: &reqwest::Client) -> AppResult<Instance> {
+    let pack = crate::share::decode(OFFICIAL_PACK_CODE)?;
+    let saved = load_dedicated();
 
-    let saved_id = fs::read_to_string(dedicated_file())
-        .ok()
-        .and_then(|data| serde_json::from_str::<String>(&data).ok());
-    if let Some(mut instance) = saved_id.and_then(|id| instances::get(&id).ok()) {
-        if instance.mc_version != version && instance.loader == Loader::Vanilla {
-            instance.mc_version = version;
-            instance = instances::update(instance)?;
+    let existing = saved.as_ref().and_then(|d| instances::get(&d.instance_id).ok());
+    if let (Some(instance), Some(saved)) = (&existing, &saved) {
+        if saved.pack_code.as_deref() == Some(OFFICIAL_PACK_CODE) {
+            return Ok(instance.clone());
         }
-        return Ok(instance);
     }
 
-    let instance = instances::create(NewInstance {
-        name: OFFICIAL_NAME.to_string(),
-        mc_version: version,
-        loader: Loader::Vanilla,
-    })?;
-    fs::write(dedicated_file(), serde_json::to_string(&instance.id)?)?;
-    Ok(instance)
+    // Création, ou remise à niveau de l'instance existante (ses mondes et réglages sont conservés).
+    let mut instance = match existing {
+        Some(instance) => instance,
+        None => instances::create(NewInstance {
+            name: OFFICIAL_NAME.to_string(),
+            mc_version: pack.mc_version.clone(),
+            loader: pack.loader.clone(),
+        })?,
+    };
+    instance.mc_version = pack.mc_version.clone();
+    instance.loader = pack.loader.clone();
+    instance.loader_version = pack.loader_version.clone();
+    let instance = instances::update(instance)?;
+
+    let mut record = Dedicated { instance_id: instance.id.clone(), pack_code: None };
+    fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
+
+    let result = crate::share::install_items(app, client, instance, &pack).await?;
+    // Le pack n'est noté comme installé que s'il l'est en entier : sinon on réessaiera.
+    if result.failed.is_empty() {
+        record.pack_code = Some(OFFICIAL_PACK_CODE.to_string());
+        fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
+    }
+    Ok(result.instance)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::instances::Loader;
 
     #[test]
-    fn reads_version_from_server_brand() {
-        assert_eq!(version_from_brand("Paper 1.21.8").as_deref(), Some("1.21.8"));
-        assert_eq!(version_from_brand("1.21.11").as_deref(), Some("1.21.11"));
-        // Proxy annonçant une plage : on vise la plus récente.
-        assert_eq!(version_from_brand("Velocity 1.7.2-1.21.8").as_deref(), Some("1.21.8"));
-        assert_eq!(version_from_brand("Requires MC 1.8 / 1.21").as_deref(), Some("1.21"));
-        assert_eq!(version_from_brand("Maintenance").as_deref(), None);
+    fn official_pack_code_is_valid() {
+        let pack = crate::share::decode(OFFICIAL_PACK_CODE).expect("code du pack officiel invalide");
+        assert_eq!(pack.mc_version, "1.21.11");
+        assert_eq!(pack.loader, Loader::Fabric);
+        assert!(pack.loader_version.is_some(), "un pack Fabric doit fixer la version du loader");
+        assert_eq!(pack.items.len(), 16);
+    }
+
+    #[test]
+    fn reads_both_dedicated_file_formats() {
+        let old: Option<Dedicated> = serde_json::from_str::<Dedicated>("\"abc\"").ok();
+        assert!(old.is_none(), "l'ancien format est une simple chaîne");
+        let new: Dedicated = serde_json::from_str(r#"{"instance_id":"abc","pack_code":"X"}"#).unwrap();
+        assert_eq!(new.pack_code.as_deref(), Some("X"));
     }
 
     #[test]

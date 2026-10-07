@@ -161,6 +161,8 @@ export const api = {
     invoke<ImportResult>("import_instance_code", { code, name }),
 
   listWardrobe: () => invoke<WardrobeSkin[]>("list_wardrobe"),
+  /// Musiques trouvées dans les fichiers du jeu déjà téléchargés.
+  listGameMusic: () => invoke<{ id: string; name: string; path: string }[]>("list_game_music"),
   removeWardrobeSkin: (id: string) => invoke<void>("remove_wardrobe_skin", { id }),
   applyWardrobeSkin: (id: string) => invoke<void>("apply_wardrobe_skin", { id }),
 

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="supported-color-schemes" content="dark" />
+    <title>Confirme ton compte Nexora Craft</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#0b0b10;">
+    <!-- Texte d'aperçu affiché dans la liste des e-mails -->
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#0b0b10;">
+      Un clic pour réserver ton pseudo {{ .Data.username }} et rejoindre Nexora-SMP.
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0b0b10" style="background-color:#0b0b10;">
+      <tr>
+        <td align="center" style="padding:40px 16px;">
+          <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;">
+            <!-- Marque -->
+            <tr>
+              <td align="center" style="padding-bottom:24px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td align="center" valign="middle" width="44" height="44" bgcolor="#f43f4e" style="width:44px;height:44px;border-radius:12px;background-color:#f43f4e;font-family:'Segoe UI',Arial,sans-serif;font-size:24px;font-weight:800;color:#ffffff;">
+                      N
+                    </td>
+                    <td style="padding-left:12px;font-family:'Segoe UI',Arial,sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;color:#ffffff;">
+                      NEXORA <span style="color:#f43f4e;">CRAFT</span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Carte -->
+            <tr>
+              <td bgcolor="#15151d" style="background-color:#15151d;border:1px solid #2a2a36;border-radius:24px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td height="6" bgcolor="#f43f4e" style="height:6px;line-height:6px;font-size:0;background-color:#f43f4e;background-image:linear-gradient(90deg,#f43f4e,#fb7a2c);border-radius:24px 24px 0 0;">
+                      &nbsp;
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:36px 36px 12px;font-family:'Segoe UI',Arial,sans-serif;">
+                      <div style="font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#f43f4e;">
+                        Dernière étape
+                      </div>
+                      <h1 style="margin:10px 0 0;font-size:28px;line-height:1.2;font-weight:800;color:#ffffff;">
+                        Bienvenue, {{ .Data.username }}
+                      </h1>
+                      <p style="margin:16px 0 0;font-size:15px;line-height:1.65;color:#a9a9b8;">
+                        Confirme ton adresse e-mail pour réserver ton pseudo. Ton compte sera créé et connecté
+                        automatiquement dans le launcher.
+                      </p>
+                    </td>
+                  </tr>
+
+                  <!-- Pseudo réservé -->
+                  <tr>
+                    <td style="padding:16px 36px 0;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#1d1d28" style="background-color:#1d1d28;border:1px solid #2a2a36;border-radius:14px;">
+                        <tr>
+                          <td style="padding:14px 18px;font-family:'Segoe UI',Arial,sans-serif;">
+                            <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#6f6f80;">
+                              Ton pseudo
+                            </div>
+                            <div style="margin-top:4px;font-family:Consolas,'Courier New',monospace;font-size:18px;font-weight:700;color:#ffffff;">
+                              {{ .Data.username }}
+                            </div>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+
+                  <!-- Bouton -->
+                  <tr>
+                    <td align="center" style="padding:28px 36px 8px;">
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                        <tr>
+                          <td align="center" bgcolor="#f43f4e" style="background-color:#f43f4e;border-radius:14px;">
+                            <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;padding:16px 36px;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#ffffff;text-decoration:none;">
+                              Confirmer mon compte
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td align="center" style="padding:8px 36px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#6f6f80;">
+                      Garde Nexora Craft ouvert sur ton ordinateur avant de cliquer :<br />
+                      le lien te ramène directement dans le launcher.
+                    </td>
+                  </tr>
+
+                  <!-- Lien de secours -->
+                  <tr>
+                    <td style="padding:28px 36px 36px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #2a2a36;">
+                        <tr>
+                          <td style="padding-top:20px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.6;color:#6f6f80;">
+                            Le bouton ne fonctionne pas ? Copie ce lien dans ton navigateur :<br />
+                            <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#f43f4e;word-break:break-all;">{{ .ConfirmationURL }}</a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Pied -->
+            <tr>
+              <td align="center" style="padding:24px 16px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.6;color:#55556a;">
+                Tu n'as pas créé de compte Nexora Craft ? Ignore cet e-mail, rien ne sera activé.<br />
+                Nexora Craft · le launcher du serveur Nexora-SMP
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -24,7 +24,8 @@ export const useToastStore = create<ToastState>((set, get) => ({
   push: (kind, text) => {
     const id = nextId++;
     set((state) => ({ toasts: [...state.toasts, { id, kind, text }].slice(-MAX_VISIBLE) }));
-    if (kind !== "info") play(kind);
+    // Seule une action réussie fait un son : pas de bruit pour les erreurs ni les simples infos.
+    if (kind === "success") play();
     // Les erreurs restent un peu plus longtemps : elles demandent d'être lues.
     setTimeout(() => get().dismiss(id), kind === "error" ? DURATION_MS * 1.8 : DURATION_MS);
   },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AccountSkin3D } from "../components/AccountSkin";
-import { FeaturedServer } from "../components/FeaturedServer";
+import { HomeCarousel } from "../components/HomeCarousel";
 import {
   AnimatedText,
   Dropdown,
@@ -67,10 +67,10 @@ export function PlayPage() {
   const percent = progressPercent(progress);
 
   return (
-    <div className="min-h-full w-full max-w-[1480px] mx-auto box-border flex flex-col px-10 pt-6 pb-8 gap-8">
+    <div className="min-h-full w-full box-border flex flex-col pt-6 pb-8 gap-8">
       {/* Hero */}
       {/* Le skin se tient juste à côté du titre ; la moitié droite reste libre pour la scène. */}
-      <section className="flex-1 flex items-center gap-12 min-h-[380px]">
+      <section className="flex-1 flex items-center gap-12 min-h-[380px] w-full max-w-[1480px] mx-auto px-10 box-border">
         <div className="flex flex-col gap-7 w-full max-w-xl shrink min-w-0">
           <div>
             <div className="eyebrow mb-3">{isRunning ? "Partie en cours" : "Prêt à jouer"}</div>
@@ -213,6 +213,7 @@ export function PlayPage() {
       </section>
 
       {showLogs && (
+        <div className="w-full max-w-[1480px] mx-auto px-10 box-border">
         <div className="terminal h-56">
           {logs.map((l, idx) => (
             <div key={idx} className={l.stream === "stderr" ? "text-red-400" : "text-text-muted"}>
@@ -221,10 +222,16 @@ export function PlayPage() {
           ))}
           <div ref={logsEndRef} />
         </div>
+        </div>
       )}
 
-      {/* Bas de page : instances récentes à gauche, serveur officiel à droite. */}
-      <div className="flex items-end gap-4 rise" style={{ animationDelay: "0.5s" }}>
+      {/* Bas de page : instances récentes à gauche ; bandeau (serveur officiel et actualités) à droite. */}
+      {/* Cette rangée prend toute la largeur : le bandeau reste collé au bord droit de la fenêtre, même
+          en plein écran, tandis que les instances restent alignées sur le titre. */}
+      <div
+        className="flex items-end gap-4 rise pr-5 pl-[max(2.5rem,calc((100%_-_1480px)/2_+_2.5rem))]"
+        style={{ animationDelay: "0.5s" }}
+      >
       {account && sorted.length > 1 && (
         <section className="flex flex-col gap-3 flex-1 min-w-0">
           <div className="flex items-baseline gap-4">
@@ -261,8 +268,8 @@ export function PlayPage() {
           </div>
         </section>
       )}
-        <div className="ml-auto">
-          <FeaturedServer />
+        <div className="ml-auto min-w-0">
+          <HomeCarousel />
         </div>
       </div>
     </div>

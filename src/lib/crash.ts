@@ -151,8 +151,15 @@ const RULES: Rule[] = [
   },
 ];
 
+/// Lignes d'erreur normales avec un compte créé dans le launcher : le jeu tente de joindre les
+/// services en ligne de Mojang (Realms, profil, télémétrie), échoue, puis continue sans problème.
+/// Elles ne sont jamais la cause d'un plantage et ne doivent pas être prises pour telle.
+const HARMLESS =
+  /Realms|Failed to (?:fetch|retrieve) (?:user properties|profile)|Couldn't (?:look up profile|connect to realms)|Signature is missing from Property|minecraftservices\.com|api\.mojang\.com/i;
+
 /// Cherche une cause connue dans les journaux. `exitCode` affine le message quand rien n'est reconnu.
-export function analyzeLogs(logs: GameLogLine[], exitCode: number | null = null): CrashReport {
+export function analyzeLogs(allLogs: GameLogLine[], exitCode: number | null = null): CrashReport {
+  const logs = allLogs.filter((l) => !HARMLESS.test(l.line));
   // On parcourt de la fin vers le début : la cause d'un crash est en général dans les dernières lignes.
   for (const rule of RULES) {
     for (let i = logs.length - 1; i >= 0; i--) {
