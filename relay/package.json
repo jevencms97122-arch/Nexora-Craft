@@ -1,0 +1,13 @@
+{
+  "name": "nexora-craft-relay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Relais d'analyse IA pour Nexora Craft : garde la clé d'API hors du launcher.",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "start": "node --env-file=.env server.mjs"
+  }
+}

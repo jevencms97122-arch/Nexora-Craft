@@ -2,17 +2,19 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { Loader, VersionEntry } from "../lib/types";
 import { useInstanceStore } from "../store/instanceStore";
+import { toast } from "../store/toastStore";
+import { Dropdown, Icon, InstanceIcon, Modal, Spinner } from "./ui";
 
 interface Props {
   onClose: () => void;
 }
 
-const LOADERS: { value: Loader; label: string; available: boolean }[] = [
-  { value: "vanilla", label: "Vanilla", available: true },
-  { value: "fabric", label: "Fabric", available: true },
-  { value: "quilt", label: "Quilt", available: true },
-  { value: "forge", label: "Forge (bientôt)", available: false },
-  { value: "neoforge", label: "NeoForge (bientôt)", available: false },
+const LOADERS: { value: Loader; label: string; hint: string; available: boolean }[] = [
+  { value: "vanilla", label: "Vanilla", hint: "Jeu de base", available: true },
+  { value: "fabric", label: "Fabric", hint: "Léger, moderne", available: true },
+  { value: "quilt", label: "Quilt", hint: "Fork de Fabric", available: true },
+  { value: "forge", label: "Forge", hint: "Bientôt", available: false },
+  { value: "neoforge", label: "NeoForge", hint: "Bientôt", available: false },
 ];
 
 export function CreateInstanceModal({ onClose }: Props) {
@@ -48,6 +50,7 @@ export function CreateInstanceModal({ onClose }: Props) {
     setError(null);
     try {
       await create({ name: name.trim(), mc_version: version, loader });
+      toast.success(`Instance « ${name.trim()} » créée`);
       onClose();
     } catch (e) {
       setError(String(e));
@@ -57,82 +60,90 @@ export function CreateInstanceModal({ onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-panel border border-border rounded-xl w-[420px] p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold mb-4">Créer une instance</h2>
+    <Modal onClose={onClose} width={500}>
+      <div className="flex items-center gap-4 mb-6">
+        <InstanceIcon name={name || "N"} className="w-14 h-14 text-2xl" />
+        <div>
+          <div className="eyebrow mb-1">Nouvelle instance</div>
+          <h2 className="section-title text-lg">Créer une instance</h2>
+        </div>
+      </div>
 
-        <label className="block text-xs text-text-muted mb-1">Nom</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full mb-4 bg-panel-2 border border-border rounded-xl px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-
-        <label className="block text-xs text-text-muted mb-1">Loader</label>
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {LOADERS.map((l) => (
-            <button
-              key={l.value}
-              type="button"
-              disabled={!l.available}
-              onClick={() => setLoader(l.value)}
-              className={`px-2 py-2 rounded-xl text-xs border transition-colors ${
-                loader === l.value
-                  ? "border-accent bg-panel-2 text-text"
-                  : "border-border text-text-muted hover:text-text"
-              } ${!l.available ? "opacity-40 cursor-not-allowed" : ""}`}
-            >
-              {l.label}
-            </button>
-          ))}
+      <div className="flex flex-col gap-5">
+        <div>
+          <label className="label">Nom</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} className="input" autoFocus />
         </div>
 
-        <label className="block text-xs text-text-muted mb-1">Version Minecraft</label>
-        {loadingVersions ? (
-          <div className="text-sm text-text-muted mb-4">Chargement des versions...</div>
-        ) : (
-          <select
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-            className="w-full mb-2 bg-panel-2 border border-border rounded-xl px-3 py-2 text-sm outline-none focus:border-accent"
-          >
-            {visibleVersions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.id} {v.type !== "release" ? `(${v.type})` : ""}
-              </option>
+        <div>
+          <label className="label">Loader</label>
+          <div className="grid grid-cols-3 gap-2">
+            {LOADERS.map((l) => (
+              <button
+                key={l.value}
+                type="button"
+                disabled={!l.available}
+                onClick={() => setLoader(l.value)}
+                className={`relative px-3 py-2.5 rounded-xl border text-left transition-all ${
+                  loader === l.value
+                    ? "border-accent bg-accent/10 shadow-[0_0_20px_-6px_var(--color-accent)]"
+                    : "border-border-strong bg-panel-2 hover:border-accent/40"
+                } ${!l.available ? "opacity-35 cursor-not-allowed" : ""}`}
+              >
+                <div className={`text-sm font-semibold ${loader === l.value ? "text-accent" : ""}`}>{l.label}</div>
+                <div className="text-[11px] text-text-faint">{l.hint}</div>
+                {loader === l.value && (
+                  <Icon name="check" className="w-3.5 h-3.5 text-accent absolute top-2.5 right-2.5" />
+                )}
+              </button>
             ))}
-          </select>
-        )}
-        <label className="flex items-center gap-2 text-xs text-text-muted mb-4 select-none">
-          <input
-            type="checkbox"
-            checked={showSnapshots}
-            onChange={(e) => setShowSnapshots(e.target.checked)}
-          />
-          Afficher les snapshots
-        </label>
+          </div>
+        </div>
 
-        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="label mb-0">Version Minecraft</label>
+            <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showSnapshots}
+                onChange={(e) => setShowSnapshots(e.target.checked)}
+                className="accent-[var(--color-accent)]"
+              />
+              Snapshots
+            </label>
+          </div>
+          {loadingVersions ? (
+            <div className="input flex items-center gap-2 text-text-muted">
+              <Spinner /> Chargement des versions...
+            </div>
+          ) : (
+            <Dropdown
+              placement="up"
+              ariaLabel="Version Minecraft"
+              value={version}
+              onChange={setVersion}
+              options={visibleVersions.map((v) => ({
+                value: v.id,
+                label: v.id,
+                hint: v.type !== "release" ? "Snapshot" : undefined,
+              }))}
+            />
+          )}
+        </div>
 
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-2 rounded-xl text-sm text-text-muted hover:text-text"
-          >
+        {error && <div className="alert-error">{error}</div>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="btn btn-ghost">
             Annuler
           </button>
-          <button
-            onClick={handleCreate}
-            disabled={creating || loadingVersions}
-            className="px-4 py-2 rounded-full text-sm bg-accent hover:bg-accent-hover active:scale-[0.98] transition-all disabled:opacity-50 font-medium"
-          >
-            {creating ? "Création..." : "Créer"}
+          <button onClick={handleCreate} disabled={creating || loadingVersions || !name.trim()} className="btn btn-primary">
+            {creating ? <Spinner /> : <Icon name="plus" className="w-4 h-4" />}
+            {creating ? "Création" : "Créer"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

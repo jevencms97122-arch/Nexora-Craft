@@ -83,6 +83,13 @@ async fn fetch_profile(
     Ok(client.get(url).send().await?.json().await?)
 }
 
+/// « groupe:artefact » d'une bibliothèque simple ; None si elle porte un classifieur (natives...),
+/// car ces variantes coexistent légitimement avec la bibliothèque principale.
+fn artifact_key(name: &str) -> Option<String> {
+    let parts: Vec<&str> = name.split(':').collect();
+    (parts.len() == 3).then(|| format!("{}:{}", parts[0], parts[1]))
+}
+
 /// Convertit un identifiant maven ("groupe:artefact:version") en chemin relatif de dépôt Maven.
 fn maven_path(name: &str) -> Option<String> {
     let parts: Vec<&str> = name.split(':').collect();
@@ -107,6 +114,14 @@ pub async fn apply_loader(
     detail.id = profile.id;
     detail.main_class = profile.main_class;
 
+    // Minecraft et le loader embarquent parfois la même bibliothèque dans deux versions (ASM,
+    // par exemple). Les deux sur le classpath font planter le loader : on garde celle du loader.
+    let provided: std::collections::HashSet<String> =
+        profile.libraries.iter().filter_map(|lib| artifact_key(&lib.name)).collect();
+    detail
+        .libraries
+        .retain(|lib| lib.natives.is_some() || artifact_key(&lib.name).is_none_or(|key| !provided.contains(&key)));
+
     for lib in &profile.libraries {
         let Some(path) = maven_path(&lib.name) else { continue };
         let url = format!("{}/{path}", lib.url.trim_end_matches('/'));
@@ -127,4 +142,16 @@ pub async fn apply_loader(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::artifact_key;
+
+    #[test]
+    fn keys_ignore_version_but_not_classifier() {
+        assert_eq!(artifact_key("org.ow2.asm:asm:9.6").as_deref(), Some("org.ow2.asm:asm"));
+        assert_eq!(artifact_key("org.ow2.asm:asm:9.9").as_deref(), Some("org.ow2.asm:asm"));
+        assert_eq!(artifact_key("org.lwjgl:lwjgl:3.3.3:natives-windows"), None);
+    }
 }

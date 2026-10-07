@@ -77,6 +77,20 @@ fn substitute(input: &str, placeholders: &HashMap<&str, String>) -> String {
     result
 }
 
+/// `--quickPlayMultiplayer` existe depuis Minecraft 1.20 ; avant, c'était `--server`/`--port`.
+fn supports_quick_play(mc_version: &str) -> bool {
+    let mut parts = mc_version.split('.');
+    let major = parts.next().and_then(|p| p.parse::<u32>().ok());
+    let minor = parts.next().and_then(|p| p.split('-').next()).and_then(|p| p.parse::<u32>().ok());
+    match (major, minor) {
+        (Some(1), Some(minor)) => minor >= 20,
+        // Nouveau format de version (ex. « 26.2 »).
+        (Some(major), _) => major > 1,
+        // Snapshots « 23w14a » : l'année suffit.
+        _ => mc_version.get(..2).and_then(|y| y.parse::<u32>().ok()).is_none_or(|year| year >= 23),
+    }
+}
+
 pub async fn launch(
     app: &AppHandle,
     java_path: &Path,
@@ -85,6 +99,7 @@ pub async fn launch(
     client_jar: &Path,
     libs: &ResolvedLibraries,
     account: &Account,
+    server: Option<&str>,
 ) -> AppResult<()> {
     let instance_dir = paths::instance_dir(&instance.id);
     let natives_dir = paths::app_data_dir()
@@ -149,6 +164,17 @@ pub async fn launch(
         );
     }
 
+    // Connexion directe à un serveur au démarrage.
+    if let Some(address) = server {
+        let (host, port) = crate::servers::split_address(address);
+        if supports_quick_play(&instance.mc_version) {
+            game_args.push("--quickPlayMultiplayer".to_string());
+            game_args.push(format!("{host}:{port}"));
+        } else {
+            game_args.extend(["--server".to_string(), host, "--port".to_string(), port.to_string()]);
+        }
+    }
+
     jvm_args.push("-cp".to_string());
     jvm_args.push(classpath_str);
 
@@ -203,8 +229,10 @@ pub async fn launch(
 
     let app_exit = app.clone();
     let instance_id_exit = instance.id.clone();
+    let started = std::time::Instant::now();
     tokio::spawn(async move {
         let status = child.wait().await.ok();
+        let _ = crate::instances::add_playtime(&instance_id_exit, started.elapsed().as_secs());
         let _ = app_exit.emit(
             "game-exited",
             GameExited {
@@ -215,4 +243,20 @@ pub async fn launch(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supports_quick_play;
+
+    #[test]
+    fn picks_join_arguments_by_version() {
+        assert!(supports_quick_play("1.21.11"));
+        assert!(supports_quick_play("1.20"));
+        assert!(supports_quick_play("26.2"));
+        assert!(supports_quick_play("24w10a"));
+        assert!(!supports_quick_play("1.19.4"));
+        assert!(!supports_quick_play("1.8.9"));
+        assert!(!supports_quick_play("22w03a"));
+    }
 }

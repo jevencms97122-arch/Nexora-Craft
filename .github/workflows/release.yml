@@ -1,0 +1,56 @@
+# Publie une nouvelle version du launcher.
+#
+# Se déclenche quand un tag « vX.Y.Z » est poussé : compile l'app pour Windows, signe la mise à
+# jour avec la clé privée (secret du dépôt) et crée la release GitHub avec l'installateur et le
+# fichier latest.json que les launchers installés consultent pour se mettre à jour.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Le tag doit correspondre à la version déclarée : sinon les launchers ne verraient pas la
+      # mise à jour (ils comparent leur version à celle de tauri.conf.json).
+      - name: Vérifier que le tag correspond à la version
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Le tag $GITHUB_REF_NAME ne correspond pas à la version $version de tauri.conf.json."
+            exit 1
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Nexora Craft ${{ github.ref_name }}"
+          releaseBody: "Télécharge le fichier « -setup.exe » pour installer le launcher. Les versions déjà installées se mettent à jour toutes seules."
+          releaseDraft: false
+          prerelease: false

@@ -2,14 +2,17 @@ use tauri::{AppHandle, State};
 
 use crate::accounts::{self, Account, AccountsFile};
 use crate::auth;
-use crate::content::{self, ContentType, InstalledContent};
+use crate::content::{self, ContentType, ContentUpdate, InstallResult, InstalledContent};
 use crate::error::{AppError, AppResult};
 use crate::favorites::{self, Favorite};
 use crate::instances::{self, Instance, Loader, NewInstance};
 use crate::minecraft::{self, loaders::LoaderKind};
 use crate::modrinth::{ProjectVersion, SearchResponse};
+use crate::screenshots::{self, Screenshot};
+use crate::servers::{self, Server, ServerStatus};
 use crate::settings::{self, Settings};
-use crate::skins;
+use crate::share::{self, ImportResult, SharedInstance};
+use crate::skins::{self, WardrobeSkin};
 use crate::state::AppState;
 
 // ---------- Instances ----------
@@ -113,6 +116,22 @@ pub async fn clear_skin(state: State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn browse_skins(state: State<'_, AppState>, after: Option<String>) -> AppResult<skins::SkinPage> {
+    skins::browse_gallery(&state.http, after.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn lookup_player_skin(state: State<'_, AppState>, username: String) -> AppResult<skins::RemoteSkin> {
+    skins::lookup_player(&state.http, &username).await
+}
+
+#[tauri::command]
+pub async fn apply_remote_skin(state: State<'_, AppState>, url: String, variant: String) -> AppResult<()> {
+    let account = fresh_active_account(&state).await?;
+    skins::apply_remote_skin(&state.http, &account, &url, &variant).await
+}
+
+#[tauri::command]
 pub fn get_local_skin(uuid: String) -> AppResult<Option<String>> {
     skins::local_skin_data_uri(&uuid)
 }
@@ -163,7 +182,12 @@ pub fn clear_background_image() -> AppResult<()> {
 // ---------- Lancement du jeu ----------
 
 #[tauri::command]
-pub async fn launch_instance(app: AppHandle, state: State<'_, AppState>, instance_id: String) -> AppResult<()> {
+pub async fn launch_instance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    instance_id: String,
+    server: Option<String>,
+) -> AppResult<()> {
     let instance = instances::get(&instance_id)?;
 
     let mut account = accounts::active()?.ok_or(AppError::NoAccount)?;
@@ -190,7 +214,17 @@ pub async fn launch_instance(app: AppHandle, state: State<'_, AppState>, instanc
     let (client_jar, libs) =
         minecraft::install::install_version(&app, &state.http, &instance.id, &detail).await?;
 
-    minecraft::launch::launch(&app, &java_path, &instance, &detail, &client_jar, &libs, &account).await?;
+    minecraft::launch::launch(
+        &app,
+        &java_path,
+        &instance,
+        &detail,
+        &client_jar,
+        &libs,
+        &account,
+        server.as_deref(),
+    )
+    .await?;
 
     instances::touch_last_played(&instance.id)?;
     Ok(())
@@ -205,8 +239,17 @@ pub async fn search_modrinth(
     content_type: ContentType,
     mc_version: Option<String>,
     loader: Option<String>,
+    offset: Option<u32>,
 ) -> AppResult<SearchResponse> {
-    content::search(&state.http, &query, content_type, mc_version.as_deref(), loader.as_deref()).await
+    content::search(
+        &state.http,
+        &query,
+        content_type,
+        mc_version.as_deref(),
+        loader.as_deref(),
+        offset.unwrap_or(0),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -223,8 +266,8 @@ pub async fn install_content(
     title: String,
     icon_url: Option<String>,
     content_type: ContentType,
-) -> AppResult<InstalledContent> {
-    content::install_version(
+) -> AppResult<InstallResult> {
+    content::install_with_dependencies(
         &state.http,
         &instance_id,
         &project_id,
@@ -250,8 +293,14 @@ pub async fn install_modpack(
     project_id: String,
     version_id: String,
     instance_name: String,
+    icon_url: Option<String>,
 ) -> AppResult<Instance> {
-    content::modpack::install(&state.http, &project_id, &version_id, &instance_name).await
+    let instance = content::modpack::install(&state.http, &project_id, &version_id, &instance_name).await?;
+    // L'instance reprend l'icône du modpack, pour se reconnaître d'un coup d'œil.
+    match icon_url {
+        Some(url) if url.starts_with("https://") => instances::set_icon_url(&instance.id, Some(url)),
+        _ => Ok(instance),
+    }
 }
 
 // ---------- Favoris ----------
@@ -314,3 +363,151 @@ pub fn remove_content(instance_id: String, project_id: String) -> AppResult<()> 
     content::remove(&instance_id, &project_id)
 }
 
+
+#[tauri::command]
+pub async fn check_content_updates(state: State<'_, AppState>, instance_id: String) -> AppResult<Vec<ContentUpdate>> {
+    content::check_updates(&state.http, &instance_id).await
+}
+
+/// Met à jour un contenu, ou tous si `project_id` est absent. Retourne le nombre de mises à jour.
+#[tauri::command]
+pub async fn update_content(
+    state: State<'_, AppState>,
+    instance_id: String,
+    project_id: Option<String>,
+) -> AppResult<usize> {
+    content::update(&state.http, &instance_id, project_id.as_deref()).await
+}
+
+#[tauri::command]
+pub fn set_content_enabled(instance_id: String, project_id: String, enabled: bool) -> AppResult<Vec<InstalledContent>> {
+    content::set_enabled(&instance_id, &project_id, enabled)
+}
+
+// ---------- Serveurs ----------
+
+#[tauri::command]
+pub fn list_servers() -> AppResult<Vec<Server>> {
+    servers::list()
+}
+
+#[tauri::command]
+pub fn add_server(name: String, address: String) -> AppResult<Vec<Server>> {
+    servers::add(&name, &address)
+}
+
+#[tauri::command]
+pub fn remove_server(id: String) -> AppResult<Vec<Server>> {
+    servers::remove(&id)
+}
+
+#[tauri::command]
+pub fn set_server_instance(id: String, instance_id: Option<String>) -> AppResult<Vec<Server>> {
+    servers::set_instance(&id, instance_id)
+}
+
+#[tauri::command]
+pub async fn ping_server(address: String) -> AppResult<ServerStatus> {
+    Ok(servers::ping(&address).await)
+}
+
+// ---------- Captures d'écran ----------
+
+#[tauri::command]
+pub fn list_screenshots() -> AppResult<Vec<Screenshot>> {
+    screenshots::list()
+}
+
+#[tauri::command]
+pub fn delete_screenshot(path: String) -> AppResult<()> {
+    screenshots::delete(&path)
+}
+
+#[tauri::command]
+pub fn open_screenshot(path: String) -> AppResult<()> {
+    screenshots::open(&path)
+}
+
+#[tauri::command]
+pub fn open_screenshots_folder(instance_id: String) -> AppResult<()> {
+    screenshots::open_folder(&instance_id)
+}
+
+// ---------- Partage d'instance par code ----------
+
+#[tauri::command]
+pub fn export_instance_code(instance_id: String) -> AppResult<String> {
+    share::export(&instance_id)
+}
+
+#[tauri::command]
+pub fn preview_instance_code(code: String) -> AppResult<SharedInstance> {
+    share::decode(&code)
+}
+
+#[tauri::command]
+pub async fn import_instance_code(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    code: String,
+    name: String,
+) -> AppResult<ImportResult> {
+    let shared = share::decode(&code)?;
+    let mut instance = instances::create(share::new_instance(&shared, &name))?;
+
+    // On reprend la version de loader du code ; à défaut, la version recommandée.
+    instance.loader_version = match (&shared.loader_version, loader_kind_for(&shared.loader)) {
+        (Some(version), _) => Some(version.clone()),
+        (None, Some(kind)) => {
+            Some(minecraft::loaders::resolve_recommended_version(&state.http, kind, &shared.mc_version).await?)
+        }
+        (None, None) => None,
+    };
+    let instance = instances::update(instance)?;
+
+    share::install_items(&app, &state.http, instance, &shared).await
+}
+
+// ---------- Garde-robe ----------
+
+#[tauri::command]
+pub fn list_wardrobe() -> AppResult<Vec<WardrobeSkin>> {
+    skins::list_wardrobe()
+}
+
+#[tauri::command]
+pub fn remove_wardrobe_skin(id: String) -> AppResult<()> {
+    skins::remove_from_wardrobe(&id)
+}
+
+#[tauri::command]
+pub async fn apply_wardrobe_skin(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let account = fresh_active_account(&state).await?;
+    skins::apply_wardrobe_skin(&state.http, &account, &id).await
+}
+
+/// Instance réservée au serveur officiel (créée à la bonne version si elle n'existe pas encore).
+#[tauri::command]
+pub async fn ensure_official_instance(state: State<'_, AppState>) -> AppResult<Instance> {
+    servers::ensure_official_instance(&state.http).await
+}
+
+/// Analyse des journaux par IA, via le relais (le launcher n'embarque aucune clé d'API).
+#[tauri::command]
+pub async fn analyze_crash_with_ai(
+    state: State<'_, AppState>,
+    instance_id: Option<String>,
+    logs: Vec<String>,
+) -> AppResult<crate::ai::AiReport> {
+    crate::ai::analyze(&state.http, instance_id.as_deref(), &logs).await
+}
+
+/// Icône ou bannière personnalisée d'une instance ; `path` absent retire l'image.
+#[tauri::command]
+pub fn set_instance_image(
+    instance_id: String,
+    kind: instances::ImageKind,
+    path: Option<String>,
+) -> AppResult<Instance> {
+    instances::set_image(&instance_id, kind, path.as_deref())
+}

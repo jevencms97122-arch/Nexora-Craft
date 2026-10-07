@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { ContentType, Instance, ModrinthHit, ProjectVersion } from "../lib/types";
+import type { ContentType, InstalledContent, Instance, ModrinthHit, ProjectVersion } from "../lib/types";
+import { Icon, InstanceIcon, Modal, Spinner, loaderLabel } from "./ui";
 
 interface Props {
   hit: ModrinthHit;
@@ -27,6 +28,8 @@ export function InstallToInstanceModal({ hit, contentType, instances, onClose, o
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /// Dépendances installées en plus, affichées avant de fermer.
+  const [installedDeps, setInstalledDeps] = useState<InstalledContent[] | null>(null);
 
   useEffect(() => {
     if (!selectedInstance) return;
@@ -52,7 +55,7 @@ export function InstallToInstanceModal({ hit, contentType, instances, onClose, o
     setInstalling(true);
     setError(null);
     try {
-      await api.installContent({
+      const result = await api.installContent({
         instanceId: selectedInstance.id,
         projectId: hit.project_id,
         versionId: selectedVersionId,
@@ -61,7 +64,8 @@ export function InstallToInstanceModal({ hit, contentType, instances, onClose, o
         contentType,
       });
       onInstalled();
-      onClose();
+      if (result.dependencies.length > 0) setInstalledDeps(result.dependencies);
+      else onClose();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -69,122 +73,159 @@ export function InstallToInstanceModal({ hit, contentType, instances, onClose, o
     }
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-panel border border-border rounded-xl w-[460px] p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-3 mb-4">
-          {hit.icon_url ? (
-            <img src={hit.icon_url} alt="" className="w-10 h-10 rounded-xl" />
-          ) : (
-            <div className="w-10 h-10 rounded-xl bg-panel-2" />
-          )}
-          <div>
-            <div className="font-semibold">{hit.title}</div>
-            <div className="text-xs text-text-muted">
-              {selectedInstance ? "Choisis la version à installer" : "Choisis l'instance"}
-            </div>
+  if (installedDeps) {
+    return (
+      <Modal onClose={onClose}>
+        <div className="flex items-center gap-4 mb-5">
+          <div className="w-12 h-12 rounded-2xl bg-accent/12 text-accent flex items-center justify-center shrink-0">
+            <Icon name="check" className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">Installé</div>
+            <div className="section-title text-lg truncate">{hit.title}</div>
           </div>
         </div>
-
-        {!selectedInstance ? (
-          <>
-            {instances.length === 0 ? (
-              <div className="text-sm text-text-muted mb-4">
-                Aucune instance. Crée-en une d'abord depuis l'onglet Instances.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-1.5 mb-4 max-h-72 overflow-y-auto">
-                {instances.map((instance) => (
-                  <button
-                    key={instance.id}
-                    onClick={() => setSelectedInstance(instance)}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl border border-border hover:border-accent/60 text-sm text-left"
-                  >
-                    <div>
-                      <div className="font-medium">{instance.name}</div>
-                      <div className="text-xs text-text-muted">
-                        {instance.mc_version} · {instance.loader}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <button
-              onClick={() => {
-                setSelectedInstance(null);
-                setSelectedVersionId(null);
-              }}
-              className="text-xs text-text-muted hover:text-text mb-2"
-            >
-              ← Changer d'instance ({selectedInstance.name})
-            </button>
-
-            {loadingVersions ? (
-              <div className="text-sm text-text-muted mb-4">Chargement des versions...</div>
-            ) : sortedVersions.length === 0 ? (
-              <div className="text-sm text-text-muted mb-4">Aucune version disponible.</div>
-            ) : (
-              <div className="flex flex-col gap-1.5 mb-4 max-h-64 overflow-y-auto">
-                {sortedVersions.map((v) => {
-                  const compatible = isCompatible(v, selectedInstance, contentType);
-                  return (
-                    <button
-                      key={v.id}
-                      onClick={() => compatible && setSelectedVersionId(v.id)}
-                      disabled={!compatible}
-                      className={`flex items-center justify-between px-3 py-2 rounded-xl border text-sm text-left ${
-                        !compatible
-                          ? "border-border opacity-40 cursor-not-allowed"
-                          : selectedVersionId === v.id
-                            ? "border-accent bg-panel-2"
-                            : "border-border hover:border-accent/40"
-                      }`}
-                    >
-                      <div>
-                        <div className="font-medium">{v.name || v.version_number}</div>
-                        <div className="text-xs text-text-muted truncate max-w-[280px]">
-                          {v.game_versions.slice(0, 4).join(", ")}
-                          {v.game_versions.length > 4 ? "…" : ""}
-                          {v.loaders.length > 0 ? ` · ${v.loaders.join(", ")}` : ""}
-                        </div>
-                      </div>
-                      <span
-                        className={`text-xs font-medium ${compatible ? "text-green-400" : "text-red-400"}`}
-                      >
-                        {compatible ? "✓" : "✗"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-
-        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
-
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded-xl text-sm text-text-muted hover:text-text">
-            Annuler
+        <p className="text-sm text-text-muted mb-3">
+          {installedDeps.length > 1
+            ? `${installedDeps.length} mods dont il a besoin ont été installés automatiquement :`
+            : "Un mod dont il a besoin a été installé automatiquement :"}
+        </p>
+        <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto -mx-1 px-1 stagger">
+          {installedDeps.map((dep) => (
+            <div key={dep.project_id} className="row">
+              {dep.icon_url ? (
+                <img src={dep.icon_url} alt="" className="icon-tile w-9 h-9" />
+              ) : (
+                <div className="icon-tile w-9 h-9" />
+              )}
+              <div className="flex-1 font-medium truncate">{dep.title}</div>
+              <span className="badge">Dépendance</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end mt-6">
+          <button onClick={onClose} className="btn btn-primary">
+            Terminé
           </button>
-          {selectedInstance && (
-            <button
-              onClick={handleInstall}
-              disabled={!selectedVersionId || installing}
-              className="px-4 py-2 rounded-full text-sm bg-accent hover:bg-accent-hover active:scale-[0.98] transition-all disabled:opacity-50 font-medium"
-            >
-              {installing ? "Installation..." : "Installer"}
-            </button>
-          )}
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center gap-4 mb-5">
+        {hit.icon_url ? (
+          <img src={hit.icon_url} alt="" className="icon-tile w-14 h-14" />
+        ) : (
+          <div className="icon-tile w-14 h-14" />
+        )}
+        <div className="min-w-0">
+          <div className="eyebrow mb-1">{selectedInstance ? "Étape 2 / 2 · Version" : "Étape 1 / 2 · Instance"}</div>
+          <div className="section-title text-lg truncate">{hit.title}</div>
         </div>
       </div>
-    </div>
+
+      {!selectedInstance ? (
+        instances.length === 0 ? (
+          <div className="text-sm text-text-muted py-6 text-center">
+            Aucune instance. Crée-en une d'abord depuis l'onglet Instances.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5 max-h-80 overflow-y-auto -mx-1 px-1 stagger">
+            {instances.map((instance) => (
+              <button
+                key={instance.id}
+                onClick={() => setSelectedInstance(instance)}
+                className="row text-left hover:!border-accent/50"
+              >
+                <InstanceIcon name={instance.name} icon={instance.icon} className="w-10 h-10 text-base" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{instance.name}</div>
+                  <div className="text-xs text-text-muted">
+                    {instance.mc_version} · {loaderLabel(instance.loader)}
+                  </div>
+                </div>
+                <Icon name="back" className="w-4 h-4 rotate-180 text-text-faint" />
+              </button>
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => {
+              setSelectedInstance(null);
+              setSelectedVersionId(null);
+            }}
+            className="row text-left"
+          >
+            <Icon name="back" className="w-4 h-4 text-text-muted" />
+            <InstanceIcon name={selectedInstance.name} icon={selectedInstance.icon} className="w-8 h-8 text-sm" />
+            <div className="flex-1 text-sm font-medium truncate">{selectedInstance.name}</div>
+            <span className="text-xs text-text-faint">Changer</span>
+          </button>
+
+          {loadingVersions ? (
+            <div className="flex items-center gap-2 text-text-muted py-6 justify-center">
+              <Spinner /> Chargement des versions...
+            </div>
+          ) : sortedVersions.length === 0 ? (
+            <div className="text-sm text-text-muted py-6 text-center">Aucune version disponible.</div>
+          ) : (
+            <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto -mx-1 px-1 stagger">
+              {sortedVersions.map((v) => {
+                const compatible = isCompatible(v, selectedInstance, contentType);
+                const selected = selectedVersionId === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => compatible && setSelectedVersionId(v.id)}
+                    disabled={!compatible}
+                    className={`row text-left ${
+                      !compatible
+                        ? "opacity-35 cursor-not-allowed"
+                        : selected
+                          ? "!border-accent !bg-accent/10"
+                          : "hover:!border-accent/40"
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">{v.name || v.version_number}</div>
+                      <div className="text-xs text-text-muted truncate">
+                        {v.game_versions.slice(0, 4).join(", ")}
+                        {v.game_versions.length > 4 ? "…" : ""}
+                        {v.loaders.length > 0 ? ` · ${v.loaders.join(", ")}` : ""}
+                      </div>
+                    </div>
+                    {compatible ? (
+                      <span className={`badge ${selected ? "badge-accent" : ""}`}>
+                        {selected ? "Choisie" : "Compatible"}
+                      </span>
+                    ) : (
+                      <span className="badge text-danger!">Incompatible</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && <div className="alert-error mt-4">{error}</div>}
+
+      <div className="flex justify-end gap-2 mt-6">
+        <button onClick={onClose} className="btn btn-ghost">
+          Annuler
+        </button>
+        {selectedInstance && (
+          <button onClick={handleInstall} disabled={!selectedVersionId || installing} className="btn btn-primary">
+            {installing ? <Spinner /> : <Icon name="download" className="w-4 h-4" />}
+            {installing ? "Installation" : "Installer"}
+          </button>
+        )}
+      </div>
+    </Modal>
   );
 }

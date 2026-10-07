@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <polygon points="60,8 105,34 60,60 15,34" fill="#ff8f6b"/>
+  <polygon points="15,34 60,60 60,112 15,86" fill="#f43f4e"/>
+  <polygon points="60,60 105,34 105,86 60,112" fill="#b81f33"/>
+  <path d="M39 40h13l17 27V40h12v48H68L51 61v27H39z" fill="#7d1020" transform="translate(4 4)"/>
+  <path d="M39 40h13l17 27V40h12v48H68L51 61v27H39z" fill="#ffffff"/>
+</svg>

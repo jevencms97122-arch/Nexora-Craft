@@ -14,6 +14,8 @@ export interface Instance {
   created_at: string;
   last_played: string | null;
   icon: string | null;
+  playtime_seconds: number;
+  banner: string | null;
 }
 
 export interface NewInstance {
@@ -102,6 +104,7 @@ export interface InstalledContent {
   icon_url: string | null;
   content_type: ContentType;
   file_name: string;
+  disabled: boolean;
 }
 
 export interface Favorite {
@@ -117,4 +120,85 @@ export interface ProjectVersion {
   version_number: string;
   game_versions: string[];
   loaders: string[];
+}
+
+export interface RemoteSkin {
+  url: string;
+  variant: "classic" | "slim";
+}
+
+export interface SkinPage {
+  skins: RemoteSkin[];
+  next: string | null;
+}
+
+export interface InstallResult {
+  item: InstalledContent;
+  dependencies: InstalledContent[];
+}
+
+export interface ContentUpdate {
+  project_id: string;
+  title: string;
+  latest_version_id: string;
+  latest_version_number: string;
+}
+
+export interface Server {
+  id: string;
+  name: string;
+  address: string;
+  instance_id: string | null;
+  /// Serveur officiel du launcher : toujours présent, non supprimable.
+  official: boolean;
+}
+
+export interface ServerStatus {
+  online: boolean;
+  players_online: number;
+  players_max: number;
+  motd: string;
+  version: string;
+  latency_ms: number;
+  favicon: string | null;
+}
+
+export interface Screenshot {
+  instance_id: string;
+  instance_name: string;
+  file_name: string;
+  path: string;
+  modified_ms: number;
+}
+
+export interface SharedInstance {
+  name: string;
+  mc_version: string;
+  loader: Loader;
+  loader_version: string | null;
+  items: { project_id: string; version_id: string; content_type: ContentType }[];
+}
+
+export interface ImportResult {
+  instance: Instance;
+  failed: string[];
+}
+
+export interface ImportProgress {
+  done: number;
+  total: number;
+  title: string;
+}
+
+export interface WardrobeSkin {
+  id: string;
+  variant: "classic" | "slim";
+  data_uri: string;
+}
+
+/// Diagnostic rédigé par l'IA à partir des journaux et de la configuration de l'instance.
+export interface AiReport {
+  title: string;
+  explanation: string;
+  suggestions: string[];
 }

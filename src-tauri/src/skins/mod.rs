@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -55,8 +57,20 @@ pub async fn set_skin(
     source: &Path,
     variant: &str,
 ) -> AppResult<()> {
-    let bytes = fs::read(source)?;
+    set_skin_bytes(client, account, fs::read(source)?, variant).await
+}
+
+pub async fn set_skin_bytes(
+    client: &reqwest::Client,
+    account: &Account,
+    bytes: Vec<u8>,
+    variant: &str,
+) -> AppResult<()> {
     validate_skin_png(&bytes)?;
+
+    let variant = if variant == "slim" { "slim" } else { "classic" };
+    // Tout skin appliqué est gardé dans la garde-robe pour y revenir en un clic.
+    remember(&bytes, variant)?;
 
     if account.is_offline {
         fs::create_dir_all(skins_dir())?;
@@ -64,7 +78,6 @@ pub async fn set_skin(
         return Ok(());
     }
 
-    let variant = if variant == "slim" { "slim" } else { "classic" };
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name("skin.png")
         .mime_str("image/png")?;
@@ -83,6 +96,118 @@ pub async fn set_skin(
         return Err(AppError::Auth(format!("échec de l'envoi du skin ({status}): {text}")));
     }
     Ok(())
+}
+
+/// Télécharge un skin depuis les serveurs de textures Mojang puis l'applique au compte.
+pub async fn apply_remote_skin(
+    client: &reqwest::Client,
+    account: &Account,
+    url: &str,
+    variant: &str,
+) -> AppResult<()> {
+    if !is_texture_url(url) {
+        return Err(AppError::Other("URL de skin non autorisée".into()));
+    }
+    let res = client.get(url).send().await?;
+    if !res.status().is_success() {
+        return Err(AppError::Other(format!("téléchargement du skin impossible ({})", res.status())));
+    }
+    let bytes = res.bytes().await?.to_vec();
+    set_skin_bytes(client, account, bytes, variant).await
+}
+
+/// Seules les textures hébergées par Mojang sont téléchargeables (évite les URL arbitraires).
+fn is_texture_url(url: &str) -> bool {
+    url.starts_with("https://textures.minecraft.net/texture/")
+        || url.starts_with("http://textures.minecraft.net/texture/")
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteSkin {
+    pub url: String,
+    /// "classic" ou "slim"
+    pub variant: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkinPage {
+    pub skins: Vec<RemoteSkin>,
+    pub next: Option<String>,
+}
+
+/// Skins récents de la galerie publique MineSkin (pas de recherche ni de noms).
+pub async fn browse_gallery(client: &reqwest::Client, after: Option<&str>) -> AppResult<SkinPage> {
+    let mut url = "https://api.mineskin.org/v2/skins?size=24".to_string();
+    if let Some(after) = after {
+        url.push_str(&format!("&after={}", urlencoding::encode(after)));
+    }
+    let res = client.get(&url).send().await?;
+    if !res.status().is_success() {
+        return Err(AppError::Other(format!("galerie MineSkin indisponible ({})", res.status())));
+    }
+    let data: serde_json::Value = res.json().await?;
+    let skins = data["skins"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|s| s["texture"].as_str())
+                .map(|hash| RemoteSkin {
+                    url: format!("https://textures.minecraft.net/texture/{hash}"),
+                    variant: "classic".into(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let next = data["pagination"]["next"]["after"].as_str().map(String::from);
+    Ok(SkinPage { skins, next })
+}
+
+/// Récupère le skin actuel d'un joueur via l'API publique Mojang.
+pub async fn lookup_player(client: &reqwest::Client, username: &str) -> AppResult<RemoteSkin> {
+    let username = username.trim();
+    if username.is_empty() || !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(AppError::Other("pseudo invalide".into()));
+    }
+    let res = client
+        .get(format!("https://api.mojang.com/users/profiles/minecraft/{username}"))
+        .send()
+        .await?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND || res.status() == reqwest::StatusCode::NO_CONTENT {
+        return Err(AppError::Other(format!("aucun joueur nommé « {username} »")));
+    }
+    if !res.status().is_success() {
+        return Err(AppError::Other(format!("recherche du joueur impossible ({})", res.status())));
+    }
+    let id = res.json::<serde_json::Value>().await?["id"]
+        .as_str()
+        .ok_or_else(|| AppError::Other("réponse Mojang invalide".into()))?
+        .to_string();
+
+    let res = client
+        .get(format!("https://sessionserver.mojang.com/session/minecraft/profile/{id}"))
+        .send()
+        .await?;
+    if !res.status().is_success() {
+        return Err(AppError::Other(format!(
+            "profil indisponible ({}), réessaie dans une minute",
+            res.status()
+        )));
+    }
+    let profile: serde_json::Value = res.json().await?;
+    let encoded = profile["properties"]
+        .as_array()
+        .and_then(|props| props.iter().find(|p| p["name"] == "textures"))
+        .and_then(|p| p["value"].as_str())
+        .ok_or_else(|| AppError::Other("ce joueur n'a pas de skin".into()))?;
+    let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let textures: serde_json::Value = serde_json::from_slice(&decoded)?;
+    let skin = &textures["textures"]["SKIN"];
+    let url = skin["url"]
+        .as_str()
+        .ok_or_else(|| AppError::Other("ce joueur utilise le skin par défaut".into()))?;
+    let variant = if skin["metadata"]["model"] == "slim" { "slim" } else { "classic" };
+    Ok(RemoteSkin { url: url.to_string(), variant: variant.into() })
 }
 
 pub async fn clear_skin(client: &reqwest::Client, account: &Account) -> AppResult<()> {
@@ -191,4 +316,97 @@ fn update_options(instance_dir: &Path, enabled: bool) -> AppResult<()> {
 
     fs::write(options_path, lines.join("\n") + "\n")?;
     Ok(())
+}
+
+// ---------- Garde-robe ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WardrobeEntry {
+    /// SHA-1 du fichier : sert d'identifiant et évite les doublons.
+    id: String,
+    variant: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WardrobeSkin {
+    pub id: String,
+    pub variant: String,
+    pub data_uri: String,
+}
+
+fn wardrobe_dir() -> PathBuf {
+    skins_dir().join("wardrobe")
+}
+
+fn wardrobe_index() -> PathBuf {
+    wardrobe_dir().join("index.json")
+}
+
+fn load_wardrobe() -> AppResult<Vec<WardrobeEntry>> {
+    let path = wardrobe_index();
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(serde_json::from_str(&fs::read_to_string(path)?).unwrap_or_default())
+}
+
+fn save_wardrobe(entries: &[WardrobeEntry]) -> AppResult<()> {
+    fs::create_dir_all(wardrobe_dir())?;
+    fs::write(wardrobe_index(), serde_json::to_string_pretty(entries)?)?;
+    Ok(())
+}
+
+fn wardrobe_file(id: &str) -> AppResult<PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::Other("identifiant de skin invalide".into()));
+    }
+    Ok(wardrobe_dir().join(format!("{id}.png")))
+}
+
+/// Ajoute un skin à la garde-robe (ou le remonte en tête s'il y est déjà).
+fn remember(bytes: &[u8], variant: &str) -> AppResult<()> {
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    let id = hex::encode(hasher.finalize());
+
+    fs::create_dir_all(wardrobe_dir())?;
+    fs::write(wardrobe_file(&id)?, bytes)?;
+    let mut entries = load_wardrobe()?;
+    entries.retain(|e| e.id != id);
+    entries.insert(0, WardrobeEntry { id, variant: variant.to_string() });
+    save_wardrobe(&entries)
+}
+
+pub fn list_wardrobe() -> AppResult<Vec<WardrobeSkin>> {
+    let mut out = Vec::new();
+    for entry in load_wardrobe()? {
+        let Ok(bytes) = fs::read(wardrobe_file(&entry.id)?) else { continue };
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+        out.push(WardrobeSkin {
+            id: entry.id,
+            variant: entry.variant,
+            data_uri: format!("data:image/png;base64,{encoded}"),
+        });
+    }
+    Ok(out)
+}
+
+pub fn remove_from_wardrobe(id: &str) -> AppResult<()> {
+    let path = wardrobe_file(id)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    let mut entries = load_wardrobe()?;
+    entries.retain(|e| e.id != id);
+    save_wardrobe(&entries)
+}
+
+pub async fn apply_wardrobe_skin(client: &reqwest::Client, account: &Account, id: &str) -> AppResult<()> {
+    let variant = load_wardrobe()?
+        .into_iter()
+        .find(|e| e.id == id)
+        .map(|e| e.variant)
+        .ok_or_else(|| AppError::Other("skin introuvable dans la garde-robe".into()))?;
+    let bytes = fs::read(wardrobe_file(id)?)?;
+    set_skin_bytes(client, account, bytes, &variant).await
 }

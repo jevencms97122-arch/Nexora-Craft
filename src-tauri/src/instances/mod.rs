@@ -32,6 +32,12 @@ pub struct Instance {
     pub last_played: Option<DateTime<Utc>>,
     #[serde(default)]
     pub icon: Option<String>,
+    /// Temps de jeu cumulé, en secondes.
+    #[serde(default)]
+    pub playtime_seconds: u64,
+    /// Image de bannière choisie par l'utilisateur (chemin local), sinon un dégradé est affiché.
+    #[serde(default)]
+    pub banner: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +99,8 @@ pub fn create(new: NewInstance) -> AppResult<Instance> {
         created_at: Utc::now(),
         last_played: None,
         icon: None,
+        playtime_seconds: 0,
+        banner: None,
     };
     fs::create_dir_all(paths::instance_dir(&id))?;
     for sub in ["mods", "shaderpacks", "resourcepacks", "datapacks", "saves", "config"] {
@@ -109,9 +117,26 @@ pub fn update(instance: Instance) -> AppResult<Instance> {
         .iter()
         .position(|i| i.id == instance.id)
         .ok_or_else(|| AppError::InstanceNotFound(instance.id.clone()))?;
+    // Le temps de jeu et la date de dernière partie sont gérés par le launcher : un formulaire
+    // resté ouvert pendant une partie ne doit pas les écraser avec d'anciennes valeurs.
+    let mut instance = instance;
+    instance.playtime_seconds = instances[idx].playtime_seconds;
+    instance.last_played = instances[idx].last_played;
+    // L'icône et la bannière ne changent que par `set_image` / `set_icon_url`.
+    instance.icon = instances[idx].icon.clone();
+    instance.banner = instances[idx].banner.clone();
     instances[idx] = instance.clone();
     save_all(&instances)?;
     Ok(instance)
+}
+
+pub fn add_playtime(id: &str, seconds: u64) -> AppResult<()> {
+    let mut instances = load_all()?;
+    if let Some(i) = instances.iter_mut().find(|i| i.id == id) {
+        i.playtime_seconds += seconds;
+    }
+    save_all(&instances)?;
+    Ok(())
 }
 
 pub fn touch_last_played(id: &str) -> AppResult<()> {
@@ -132,4 +157,78 @@ pub fn delete(id: &str) -> AppResult<()> {
         fs::remove_dir_all(dir)?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageKind {
+    Icon,
+    Banner,
+}
+
+impl ImageKind {
+    fn prefix(self) -> &'static str {
+        match self {
+            ImageKind::Icon => ".nexora-icon-",
+            ImageKind::Banner => ".nexora-banner-",
+        }
+    }
+}
+
+/// Définit (ou retire, si `source` est absent) l'icône ou la bannière d'une instance. L'image est
+/// copiée dans le dossier de l'instance : le fichier d'origine peut ensuite être déplacé.
+pub fn set_image(id: &str, kind: ImageKind, source: Option<&str>) -> AppResult<Instance> {
+    let mut instances = load_all()?;
+    let idx = instances
+        .iter()
+        .position(|i| i.id == id)
+        .ok_or_else(|| AppError::InstanceNotFound(id.to_string()))?;
+    let dir = paths::instance_dir(id);
+    fs::create_dir_all(&dir)?;
+
+    // L'ancienne image est retirée dans tous les cas.
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(kind.prefix()) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    let stored = match source {
+        Some(source) => {
+            let source = std::path::Path::new(source);
+            let ext = source
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .filter(|e| ["png", "jpg", "jpeg", "webp", "gif"].contains(&e.as_str()))
+                .ok_or_else(|| AppError::Other("format d'image non pris en charge (png, jpg, webp, gif)".into()))?;
+            // Le nom change à chaque fois pour que l'affichage ne garde pas l'ancienne image en cache.
+            let dest = dir.join(format!("{}{}.{ext}", kind.prefix(), Utc::now().timestamp_millis()));
+            fs::copy(source, &dest)?;
+            Some(dest.display().to_string())
+        }
+        None => None,
+    };
+
+    match kind {
+        ImageKind::Icon => instances[idx].icon = stored,
+        ImageKind::Banner => instances[idx].banner = stored,
+    }
+    save_all(&instances)?;
+    Ok(instances[idx].clone())
+}
+
+/// Icône distante (celle du modpack Modrinth dont l'instance est issue).
+pub fn set_icon_url(id: &str, url: Option<String>) -> AppResult<Instance> {
+    let mut instances = load_all()?;
+    let instance = instances
+        .iter_mut()
+        .find(|i| i.id == id)
+        .ok_or_else(|| AppError::InstanceNotFound(id.to_string()))?;
+    instance.icon = url;
+    let updated = instance.clone();
+    save_all(&instances)?;
+    Ok(updated)
 }

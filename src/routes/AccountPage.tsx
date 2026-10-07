@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
+import { AccountSkin, AccountSkin3D, SkinCanvas } from "../components/AccountSkin";
+import { SkinBrowser } from "../components/SkinBrowser";
+import { Icon, PageHeader, Spinner } from "../components/ui";
 import { api } from "../lib/api";
+import { isValidUsername } from "../lib/format";
+import type { RemoteSkin, WardrobeSkin } from "../lib/types";
 import { useAccountStore } from "../store/accountStore";
+import { toast } from "../store/toastStore";
 
 export function AccountPage() {
-  const { accounts, activeUuid, loading, error, refresh, login, loginOffline, setActive, remove } =
+  const { accounts, activeUuid, loading, error, refresh, loginOffline, setActive, remove, loadLocalSkin, setRemoteSkin } =
     useAccountStore();
+  const [wardrobe, setWardrobe] = useState<WardrobeSkin[]>([]);
   const [offlineName, setOfflineName] = useState("");
   const [variant, setVariant] = useState<"classic" | "slim">("classic");
   const [skinBusy, setSkinBusy] = useState(false);
-  const [skinMessage, setSkinMessage] = useState<string | null>(null);
-  const [localSkin, setLocalSkin] = useState<string | null>(null);
 
   const activeAccount = accounts.find((a) => a.uuid === activeUuid) ?? null;
 
@@ -19,189 +23,252 @@ export function AccountPage() {
     refresh();
   }, [refresh]);
 
+  async function loadWardrobe() {
+    const list = await api.listWardrobe().catch(() => []);
+    setWardrobe(list);
+    return list;
+  }
+
   useEffect(() => {
-    setSkinMessage(null);
-    if (activeAccount?.is_offline) {
-      api.getLocalSkin(activeAccount.uuid).then(setLocalSkin).catch(() => setLocalSkin(null));
-    } else {
-      setLocalSkin(null);
+    loadWardrobe();
+  }, []);
+
+  /// `applied` : vrai si l'action applique un skin (qui se retrouve alors en tête de garde-robe).
+  async function runSkinAction(action: () => Promise<void>, success: string, applied = true) {
+    if (!activeAccount) return;
+    setSkinBusy(true);
+    try {
+      await action();
+      const list = await loadWardrobe();
+      if (activeAccount.is_offline) await loadLocalSkin(activeAccount.uuid);
+      else if (applied && list[0]) setRemoteSkin(activeAccount.uuid, { url: list[0].data_uri, variant: list[0].variant });
+      toast.success(success);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSkinBusy(false);
     }
-  }, [activeAccount?.uuid, activeAccount?.is_offline]);
+  }
 
   async function handlePickSkin() {
-    if (!activeAccount) return;
     const path = await open({
       multiple: false,
       filters: [{ name: "Skin Minecraft", extensions: ["png"] }],
     });
     if (!path || Array.isArray(path)) return;
-    setSkinBusy(true);
-    setSkinMessage(null);
-    try {
-      await api.setSkin(path, variant);
-      if (activeAccount.is_offline) setLocalSkin(await api.getLocalSkin(activeAccount.uuid));
-      setSkinMessage("Skin mis à jour.");
-    } catch (e) {
-      setSkinMessage(String(e));
-    } finally {
-      setSkinBusy(false);
-    }
+    await runSkinAction(() => api.setSkin(path, variant), "Skin mis à jour");
   }
 
-  async function handleClearSkin() {
-    if (!activeAccount) return;
-    setSkinBusy(true);
-    setSkinMessage(null);
-    try {
-      await api.clearSkin();
-      setLocalSkin(null);
-      setSkinMessage("Skin réinitialisé.");
-    } catch (e) {
-      setSkinMessage(String(e));
-    } finally {
-      setSkinBusy(false);
-    }
+  function handleApplyRemote(skin: RemoteSkin) {
+    return runSkinAction(() => api.applyRemoteSkin(skin.url, skin.variant), "Skin appliqué");
+  }
+
+  function handleClearSkin() {
+    return runSkinAction(() => api.clearSkin(), "Skin réinitialisé", false);
+  }
+
+  function handleApplyWardrobe(id: string) {
+    return runSkinAction(() => api.applyWardrobeSkin(id), "Skin appliqué");
+  }
+
+  async function handleRemoveWardrobe(id: string) {
+    await api.removeWardrobeSkin(id).catch(() => {});
+    await loadWardrobe();
+    toast.info("Skin retiré de la garde-robe");
   }
 
   async function handleOfflineLogin() {
-    if (!offlineName.trim()) return;
-    await loginOffline(offlineName.trim());
-    setOfflineName("");
+    if (!isValidUsername(offlineName)) return;
+    const name = offlineName.trim();
+    await loginOffline(name);
+    if (!useAccountStore.getState().error) {
+      setOfflineName("");
+      toast.success(`Compte ${name} créé`);
+    }
   }
 
   return (
-    <div className="p-6 max-w-xl">
-      <h1 className="text-xl font-semibold mb-6">Compte</h1>
+    <div className="page">
+      <PageHeader eyebrow="Profil" title="Compte" subtitle="Gère tes comptes Minecraft et ton apparence en jeu." />
 
-      <button
-        onClick={login}
-        disabled={loading}
-        className="px-4 py-2 rounded-full bg-accent hover:bg-accent-hover active:scale-[0.98] transition-all disabled:opacity-50 text-sm font-medium mb-2"
-      >
-        {loading ? "Connexion en cours (navigateur)..." : "Se connecter avec Microsoft"}
-      </button>
-      <p className="text-xs text-text-muted mb-6">
-        Nécessite un Client ID Microsoft configuré dans{" "}
-        <Link to="/settings" className="text-accent underline">
-          Paramètres
-        </Link>
-        .
-      </p>
+      {error && <div className="alert-error">{error}</div>}
 
-      {error && <div className="text-sm text-red-400 mb-4 whitespace-pre-wrap">{error}</div>}
+      {/* Deux colonnes : l'apparence à gauche (profil, garde-robe, skins en ligne), les comptes à droite. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start">
+        <div className="flex flex-col gap-6 min-w-0">
+          {activeAccount ? (
+            <section className="card overflow-hidden">
+              <div className="grid grid-cols-[220px_minmax(0,1fr)]">
+                <div className="relative flex items-end justify-center pt-8 pb-6 bg-gradient-to-b from-accent/10 via-transparent to-transparent border-r border-border">
+                  <div className="absolute inset-0 grid-pattern opacity-70" />
+                  <div className="absolute bottom-5 w-36 h-8 rounded-[50%] bg-accent/25 blur-xl" />
+                  <div className="relative drop-shadow-[0_16px_24px_rgba(0,0,0,0.6)]">
+                    <AccountSkin3D account={activeAccount} height={256} />
+                  </div>
+                </div>
 
-      <div className="bg-panel-2 border border-border rounded-2xl p-4 mb-6">
-        <h2 className="text-sm font-medium mb-1">Compte local (test)</h2>
-        <p className="text-xs text-text-muted mb-3">
-          Pas de vraie session Mojang, uniquement pour tester instances/mods/lancement en local
-          (solo). Ne fonctionnera pas sur des serveurs multijoueur en ligne.
-        </p>
-        <div className="flex gap-2">
-          <input
-            value={offlineName}
-            onChange={(e) => setOfflineName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleOfflineLogin()}
-            placeholder="Pseudo"
-            className="flex-1 bg-panel border border-border rounded-xl px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-          <button
-            onClick={handleOfflineLogin}
-            disabled={loading || !offlineName.trim()}
-            className="px-4 py-2 rounded-xl text-sm font-medium border border-border hover:border-accent/60 disabled:opacity-50"
-          >
-            Créer
-          </button>
-        </div>
-      </div>
+                <div className="p-6 flex flex-col gap-5 min-w-0 justify-center">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-semibold truncate" style={{ fontFamily: "var(--font-display)" }}>
+                        {activeAccount.username}
+                      </h2>
+                      <span className="badge badge-accent">Actif</span>
+                    </div>
+                    <p className="text-xs text-text-muted mt-2 leading-relaxed max-w-md">
+                      {activeAccount.is_offline
+                        ? "Le skin est appliqué via un resource pack au lancement : il est visible par toi. Le modèle des bras dépend du compte."
+                        : "Le skin est envoyé sur ton compte Mojang et visible par tous les joueurs. Il peut mettre quelques minutes à apparaître."}
+                    </p>
+                  </div>
 
-      {activeAccount && (
-        <div className="bg-panel-2 border border-border rounded-2xl p-4 mb-6">
-          <h2 className="text-sm font-medium mb-1">Skin de {activeAccount.username}</h2>
-          <p className="text-xs text-text-muted mb-3">
-            {activeAccount.is_offline
-              ? "Compte local : le skin est appliqué via un resource pack au lancement (visible uniquement par toi, en solo). Le modèle des bras (classique/fin) dépend du compte."
-              : "Le skin est envoyé sur ton compte Mojang et visible par tous les joueurs. Il peut mettre quelques minutes à apparaître."}
-          </p>
-          <div className="flex items-center gap-3 flex-wrap">
-            {activeAccount.is_offline && localSkin && (
-              <img
-                src={localSkin}
-                alt="Skin actuel"
-                className="w-16 h-16 rounded-xl border border-border"
-                style={{ imageRendering: "pixelated" }}
-              />
-            )}
-            {!activeAccount.is_offline && (
-              <select
-                value={variant}
-                onChange={(e) => setVariant(e.target.value as "classic" | "slim")}
-                className="bg-panel border border-border rounded-xl px-3 py-2 text-sm outline-none focus:border-accent"
-              >
-                <option value="classic">Classique (bras larges)</option>
-                <option value="slim">Fin (bras fins)</option>
-              </select>
-            )}
-            <button
-              onClick={handlePickSkin}
-              disabled={skinBusy}
-              className="px-4 py-2 rounded-xl text-sm font-medium border border-border hover:border-accent/60 disabled:opacity-50"
-            >
-              {skinBusy ? "Envoi..." : "Choisir un skin (.png)"}
-            </button>
-            <button
-              onClick={handleClearSkin}
-              disabled={skinBusy}
-              className="px-3 py-2 rounded-xl text-sm text-text-muted hover:text-red-400 disabled:opacity-50"
-            >
-              Réinitialiser
-            </button>
-          </div>
-          {skinMessage && <div className="text-xs mt-3 whitespace-pre-wrap">{skinMessage}</div>}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        {accounts.map((account) => (
-          <div
-            key={account.uuid}
-            className={`flex items-center gap-3 p-3 rounded-2xl border ${
-              account.uuid === activeUuid ? "border-accent bg-panel-2" : "border-border bg-panel"
-            }`}
-          >
-            <img
-              src={`https://mc-heads.net/avatar/${account.uuid}/40`}
-              alt=""
-              className="w-10 h-10 rounded-xl"
-            />
-            <div className="flex-1">
-              <div className="font-medium">
-                {account.username}
-                {account.is_offline && (
-                  <span className="ml-2 text-xs text-text-muted border border-border rounded px-1.5 py-0.5">
-                    local
-                  </span>
-                )}
+                  <div className="flex flex-wrap gap-2">
+                    {!activeAccount.is_offline && (
+                      <div className="flex rounded-xl bg-panel-2 border border-border-strong p-1">
+                        {(["classic", "slim"] as const).map((v) => (
+                          <button
+                            key={v}
+                            onClick={() => setVariant(v)}
+                            className={`px-3 h-7 rounded-lg text-xs font-semibold transition-colors ${
+                              variant === v ? "bg-accent text-accent-ink" : "text-text-muted hover:text-text"
+                            }`}
+                          >
+                            {v === "classic" ? "Bras larges" : "Bras fins"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={handlePickSkin} disabled={skinBusy} className="btn btn-primary">
+                      {skinBusy ? <Spinner /> : <Icon name="upload" className="w-4 h-4" />}
+                      Importer un .png
+                    </button>
+                    <button onClick={handleClearSkin} disabled={skinBusy} className="btn btn-ghost">
+                      <Icon name="refresh" className="w-4 h-4" /> Réinitialiser
+                    </button>
+                  </div>
+                </div>
               </div>
-              {account.uuid === activeUuid && (
-                <div className="text-xs text-accent">Compte actif</div>
-              )}
+            </section>
+          ) : (
+            <section className="empty-state">
+              <Icon name="user" className="w-8 h-8 text-text-faint" />
+              <div className="section-title text-text">Aucun compte</div>
+              <p className="text-sm">Crée un compte avec ton pseudo pour commencer.</p>
+            </section>
+          )}
+
+          {activeAccount && wardrobe.length > 0 && (
+            <section className="card p-5 flex flex-col gap-4">
+              <div>
+                <div className="eyebrow mb-1.5">Garde-robe</div>
+                <h2 className="section-title text-lg">Mes skins</h2>
+                <p className="text-xs text-text-muted mt-1">
+                  Chaque skin que tu appliques est gardé ici. Clique pour le remettre.
+                </p>
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3 stagger">
+                {wardrobe.map((skin) => (
+                  <div key={skin.id} className="group relative">
+                    <button
+                      onClick={() => handleApplyWardrobe(skin.id)}
+                      disabled={skinBusy}
+                      title="Appliquer ce skin"
+                      className="w-full row flex-col !gap-2 !py-3 disabled:opacity-50"
+                    >
+                      <SkinCanvas
+                        src={skin.data_uri}
+                        mode="body"
+                        className="h-24 transition-transform group-hover:-translate-y-1"
+                      />
+                      <span className="text-[11px] font-semibold text-text-faint group-hover:text-accent transition-colors">
+                        {skin.variant === "slim" ? "Bras fins" : "Bras larges"}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => handleRemoveWardrobe(skin.id)}
+                      title="Retirer de la garde-robe"
+                      className="absolute top-1.5 right-1.5 w-7 h-7 rounded-lg flex items-center justify-center text-text-faint hover:text-danger hover:bg-fg/8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    >
+                      <Icon name="trash" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {activeAccount && (
+            <section className="card p-5">
+              <SkinBrowser variant={variant} onApply={handleApplyRemote} busy={skinBusy} />
+            </section>
+          )}
+        </div>
+
+        {/* Comptes */}
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-2">
+          <section className="card p-5 flex flex-col gap-3">
+            <h2 className="section-title">Mes comptes</h2>
+            {accounts.length === 0 && <p className="text-xs text-text-muted">Aucun compte pour l'instant.</p>}
+            {accounts.map((account) => {
+              const isActive = account.uuid === activeUuid;
+              return (
+                <div
+                  key={account.uuid}
+                  className={`row group ${isActive ? "!border-accent/50 !bg-accent/5" : "cursor-pointer"}`}
+                  onClick={() => !isActive && setActive(account.uuid)}
+                >
+                  <div className="w-10 h-10 rounded-xl overflow-hidden bg-panel-3 shrink-0">
+                    <AccountSkin account={account} mode="head" className="w-full h-full" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold truncate">{account.username}</div>
+                    <div className={`text-[11px] ${isActive ? "text-accent" : "text-text-faint"}`}>
+                      {isActive ? "● Actif" : "Cliquer pour activer"}
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(account.uuid);
+                      toast.info(`Compte ${account.username} retiré`);
+                    }}
+                    className="btn btn-ghost btn-sm w-8 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:!text-danger"
+                    title="Retirer ce compte"
+                  >
+                    <Icon name="trash" className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
+          </section>
+
+          <section className="card p-5 flex flex-col gap-3">
+            <h2 className="section-title">Ajouter un compte</h2>
+            <div>
+              <label className="label">Pseudo</label>
+              <div className="flex gap-2">
+                <input
+                  value={offlineName}
+                  onChange={(e) => setOfflineName(e.target.value.replace(/[^A-Za-z0-9_]/g, ""))}
+                  onKeyDown={(e) => e.key === "Enter" && handleOfflineLogin()}
+                  placeholder="Ton pseudo en jeu"
+                  maxLength={16}
+                  className="input"
+                />
+                <button
+                  onClick={handleOfflineLogin}
+                  disabled={loading || !isValidUsername(offlineName)}
+                  className="btn btn-primary"
+                >
+                  Créer
+                </button>
+              </div>
+              <p className="text-[11px] text-text-faint mt-2 leading-relaxed">
+                3 à 16 caractères : lettres, chiffres et « _ ».
+              </p>
             </div>
-            {account.uuid !== activeUuid && (
-              <button
-                onClick={() => setActive(account.uuid)}
-                className="text-xs text-text-muted hover:text-text"
-              >
-                Activer
-              </button>
-            )}
-            <button
-              onClick={() => remove(account.uuid)}
-              className="text-xs text-text-muted hover:text-red-400"
-            >
-              Retirer
-            </button>
-          </div>
-        ))}
+          </section>
+        </aside>
       </div>
     </div>
   );

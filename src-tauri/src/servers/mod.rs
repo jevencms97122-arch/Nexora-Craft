@@ -1,0 +1,353 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use uuid::Uuid;
+
+use crate::error::{AppError, AppResult};
+use crate::instances::{self, Instance, Loader, NewInstance};
+use crate::paths;
+
+const DEFAULT_PORT: u16 = 25565;
+const PING_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Serveur officiel du launcher : toujours présent en tête de liste, impossible à retirer.
+const OFFICIAL_ID: &str = "nexora-smp";
+const OFFICIAL_NAME: &str = "Nexora-SMP";
+const OFFICIAL_ADDRESS: &str = "92.49.99.59:25565";
+/// Version utilisée pour l'instance dédiée si le serveur ne répond pas au moment de la créer.
+const OFFICIAL_FALLBACK_VERSION: &str = "1.21.8";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Server {
+    pub id: String,
+    pub name: String,
+    pub address: String,
+    /// Instance utilisée par le bouton « Rejoindre » (sinon la dernière jouée).
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    /// Serveur officiel du launcher (non supprimable). Recalculé à chaque lecture.
+    #[serde(default)]
+    pub official: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ServerStatus {
+    pub online: bool,
+    pub players_online: u32,
+    pub players_max: u32,
+    pub motd: String,
+    pub version: String,
+    pub latency_ms: u32,
+    /// Icône du serveur (data URI PNG), si fournie.
+    pub favicon: Option<String>,
+}
+
+fn file() -> std::path::PathBuf {
+    paths::app_data_dir().join("servers.json")
+}
+
+fn read_file() -> AppResult<Vec<Server>> {
+    let path = file();
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let data = fs::read_to_string(path)?;
+    if data.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(serde_json::from_str(&data)?)
+}
+
+/// Serveurs enregistrés, avec le serveur officiel toujours en premier. Son nom et son adresse
+/// viennent du launcher (pas du fichier) ; seul le choix d'instance de l'utilisateur est conservé.
+pub fn list() -> AppResult<Vec<Server>> {
+    let mut servers = read_file()?;
+    let saved = servers.iter().position(|s| s.id == OFFICIAL_ID).map(|i| servers.remove(i));
+    for server in &mut servers {
+        server.official = false;
+    }
+    servers.insert(
+        0,
+        Server {
+            id: OFFICIAL_ID.to_string(),
+            name: OFFICIAL_NAME.to_string(),
+            address: OFFICIAL_ADDRESS.to_string(),
+            instance_id: saved.and_then(|s| s.instance_id),
+            official: true,
+        },
+    );
+    Ok(servers)
+}
+
+fn save(servers: &[Server]) -> AppResult<()> {
+    fs::write(file(), serde_json::to_string_pretty(servers)?)?;
+    Ok(())
+}
+
+pub fn add(name: &str, address: &str) -> AppResult<Vec<Server>> {
+    let address = address.trim();
+    if address.is_empty() || address.contains(char::is_whitespace) {
+        return Err(AppError::Other("adresse de serveur invalide".into()));
+    }
+    let mut servers = list()?;
+    servers.push(Server {
+        id: Uuid::new_v4().to_string(),
+        name: if name.trim().is_empty() { address.to_string() } else { name.trim().to_string() },
+        address: address.to_string(),
+        instance_id: None,
+        official: false,
+    });
+    save(&servers)?;
+    Ok(servers)
+}
+
+pub fn set_instance(id: &str, instance_id: Option<String>) -> AppResult<Vec<Server>> {
+    let mut servers = list()?;
+    if let Some(server) = servers.iter_mut().find(|s| s.id == id) {
+        server.instance_id = instance_id;
+    }
+    save(&servers)?;
+    Ok(servers)
+}
+
+pub fn remove(id: &str) -> AppResult<Vec<Server>> {
+    if id == OFFICIAL_ID {
+        return Err(AppError::Other("le serveur officiel ne peut pas être retiré".into()));
+    }
+    let mut servers = list()?;
+    servers.retain(|s| s.id != id);
+    save(&servers)?;
+    Ok(servers)
+}
+
+/// Sépare « hôte:port » ; le port par défaut de Minecraft est utilisé s'il est absent.
+pub fn split_address(address: &str) -> (String, u16) {
+    match address.rsplit_once(':') {
+        Some((host, port)) => match port.parse() {
+            Ok(port) => (host.to_string(), port),
+            Err(_) => (address.to_string(), DEFAULT_PORT),
+        },
+        None => (address.to_string(), DEFAULT_PORT),
+    }
+}
+
+fn write_varint(buf: &mut Vec<u8>, mut value: u32) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            buf.push(byte);
+            return;
+        }
+        buf.push(byte | 0x80);
+    }
+}
+
+async fn read_varint(stream: &mut TcpStream) -> AppResult<u32> {
+    let mut value = 0u32;
+    for shift in (0..35).step_by(7) {
+        let byte = stream.read_u8().await?;
+        value |= ((byte & 0x7f) as u32) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+    }
+    Err(AppError::Other("réponse du serveur invalide".into()))
+}
+
+/// Aplatit un composant de texte Minecraft (chaîne ou objet avec `text`/`extra`) en texte brut.
+fn flatten_text(value: &serde_json::Value, out: &mut String) {
+    match value {
+        serde_json::Value::String(s) => out.push_str(s),
+        serde_json::Value::Array(items) => items.iter().for_each(|i| flatten_text(i, out)),
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get("text") {
+                flatten_text(text, out);
+            }
+            if let Some(extra) = map.get("extra") {
+                flatten_text(extra, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Retire les codes de couleur « §x » des anciens formats de texte.
+fn strip_formatting(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '§' {
+            chars.next();
+        } else {
+            out.push(c);
+        }
+    }
+    out.split('\n').map(str::trim).collect::<Vec<_>>().join("\n").trim().to_string()
+}
+
+/// Interroge un serveur avec le protocole « Server List Ping » de Minecraft.
+async fn query(address: &str) -> AppResult<ServerStatus> {
+    let (host, port) = split_address(address);
+    let started = Instant::now();
+    let mut stream = TcpStream::connect((host.as_str(), port)).await?;
+
+    // Poignée de main (état suivant : statut), puis requête de statut.
+    let mut handshake = vec![0x00];
+    write_varint(&mut handshake, u32::MAX); // version de protocole -1 : « je demande juste le statut »
+    write_varint(&mut handshake, host.len() as u32);
+    handshake.extend_from_slice(host.as_bytes());
+    handshake.extend_from_slice(&port.to_be_bytes());
+    write_varint(&mut handshake, 1);
+
+    let mut packet = Vec::new();
+    write_varint(&mut packet, handshake.len() as u32);
+    packet.extend(handshake);
+    packet.extend_from_slice(&[0x01, 0x00]);
+    stream.write_all(&packet).await?;
+
+    let _packet_len = read_varint(&mut stream).await?;
+    let _packet_id = read_varint(&mut stream).await?;
+    let json_len = read_varint(&mut stream).await? as usize;
+    if json_len > 1024 * 1024 {
+        return Err(AppError::Other("réponse du serveur trop volumineuse".into()));
+    }
+    let mut body = vec![0u8; json_len];
+    stream.read_exact(&mut body).await?;
+    let latency_ms = started.elapsed().as_millis() as u32;
+
+    let json: serde_json::Value = serde_json::from_slice(&body)?;
+    let mut motd = String::new();
+    flatten_text(&json["description"], &mut motd);
+
+    Ok(ServerStatus {
+        online: true,
+        players_online: json["players"]["online"].as_u64().unwrap_or(0) as u32,
+        players_max: json["players"]["max"].as_u64().unwrap_or(0) as u32,
+        motd: strip_formatting(&motd),
+        version: strip_formatting(json["version"]["name"].as_str().unwrap_or("")),
+        latency_ms,
+        favicon: json["favicon"].as_str().map(String::from),
+    })
+}
+
+/// Statut d'un serveur ; un serveur injoignable est simplement rapporté hors ligne.
+pub async fn ping(address: &str) -> ServerStatus {
+    match tokio::time::timeout(PING_TIMEOUT, query(address)).await {
+        Ok(Ok(status)) => status,
+        _ => ServerStatus::default(),
+    }
+}
+
+// ---------- Instance dédiée au serveur officiel ----------
+
+fn dedicated_file() -> std::path::PathBuf {
+    paths::app_data_dir().join("official-instance.json")
+}
+
+/// Extrait la version de Minecraft du nom annoncé par le serveur (« Paper 1.21.8 » -> « 1.21.8 »).
+/// Si plusieurs versions sont annoncées (proxy), la dernière citée est retenue.
+fn version_from_brand(brand: &str) -> Option<String> {
+    brand
+        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .map(|token| token.trim_matches('.'))
+        .filter(|token| token.contains('.') && token.starts_with(|c: char| c.is_ascii_digit()))
+        .last()
+        .map(String::from)
+}
+
+/// Version de Minecraft à utiliser pour rejoindre le serveur officiel : celle qu'il annonce,
+/// si elle existe bien chez Mojang, sinon la version de secours.
+async fn official_version(client: &reqwest::Client) -> String {
+    let announced = version_from_brand(&ping(OFFICIAL_ADDRESS).await.version);
+    if let Some(version) = announced {
+        if crate::minecraft::find_version_entry(client, &version).await.is_ok() {
+            return version;
+        }
+    }
+    OFFICIAL_FALLBACK_VERSION.to_string()
+}
+
+/// Retourne l'instance réservée au serveur officiel, en la créant au premier appel. Elle est
+/// toujours à la version du serveur : s'il a été mis à jour, l'instance suit.
+pub async fn ensure_official_instance(client: &reqwest::Client) -> AppResult<Instance> {
+    let version = official_version(client).await;
+
+    let saved_id = fs::read_to_string(dedicated_file())
+        .ok()
+        .and_then(|data| serde_json::from_str::<String>(&data).ok());
+    if let Some(mut instance) = saved_id.and_then(|id| instances::get(&id).ok()) {
+        if instance.mc_version != version && instance.loader == Loader::Vanilla {
+            instance.mc_version = version;
+            instance = instances::update(instance)?;
+        }
+        return Ok(instance);
+    }
+
+    let instance = instances::create(NewInstance {
+        name: OFFICIAL_NAME.to_string(),
+        mc_version: version,
+        loader: Loader::Vanilla,
+    })?;
+    fs::write(dedicated_file(), serde_json::to_string(&instance.id)?)?;
+    Ok(instance)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_version_from_server_brand() {
+        assert_eq!(version_from_brand("Paper 1.21.8").as_deref(), Some("1.21.8"));
+        assert_eq!(version_from_brand("1.21.11").as_deref(), Some("1.21.11"));
+        // Proxy annonçant une plage : on vise la plus récente.
+        assert_eq!(version_from_brand("Velocity 1.7.2-1.21.8").as_deref(), Some("1.21.8"));
+        assert_eq!(version_from_brand("Requires MC 1.8 / 1.21").as_deref(), Some("1.21"));
+        assert_eq!(version_from_brand("Maintenance").as_deref(), None);
+    }
+
+    #[test]
+    fn splits_host_and_port() {
+        assert_eq!(split_address("play.example.net"), ("play.example.net".to_string(), 25565));
+        assert_eq!(split_address("fox.playit.gg:41234"), ("fox.playit.gg".to_string(), 41234));
+    }
+
+    #[test]
+    fn official_server_cannot_be_removed() {
+        assert!(remove(OFFICIAL_ID).is_err());
+    }
+
+    #[test]
+    fn strips_legacy_color_codes() {
+        assert_eq!(strip_formatting("§aHello §lWorld\n  §7line two "), "Hello World\nline two");
+    }
+
+    /// Test réseau, à lancer à la main : `cargo test pings_public_server -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn pings_public_server() {
+        let status = ping("mc.hypixel.net").await;
+        assert!(status.online, "serveur public injoignable");
+        assert!(status.players_max > 0);
+        println!("{} joueurs / {} - {} ms - {}", status.players_online, status.players_max, status.latency_ms, status.version);
+    }
+}
+
+#[cfg(test)]
+mod official_tests {
+    use super::*;
+
+    /// Test réseau, à lancer à la main : `cargo test pings_official_server -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn pings_official_server() {
+        let status = ping(OFFICIAL_ADDRESS).await;
+        println!(
+            "en ligne: {} - {} / {} joueurs - {} ms - version: {} - motd: {:?}",
+            status.online, status.players_online, status.players_max, status.latency_ms, status.version, status.motd
+        );
+    }
+}
