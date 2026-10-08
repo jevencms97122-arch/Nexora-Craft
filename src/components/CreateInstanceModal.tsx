@@ -13,8 +13,8 @@ const LOADERS: { value: Loader; label: string; hint: string; available: boolean 
   { value: "vanilla", label: "Vanilla", hint: "Jeu de base", available: true },
   { value: "fabric", label: "Fabric", hint: "Léger, moderne", available: true },
   { value: "quilt", label: "Quilt", hint: "Fork de Fabric", available: true },
-  { value: "forge", label: "Forge", hint: "Bientôt", available: false },
-  { value: "neoforge", label: "NeoForge", hint: "Bientôt", available: false },
+  { value: "forge", label: "Forge", hint: "Gros mods", available: true },
+  { value: "neoforge", label: "NeoForge", hint: "Dès la 1.20.2", available: true },
 ];
 
 export function CreateInstanceModal({ onClose }: Props) {

@@ -43,6 +43,14 @@ async fn download_one(client: &reqwest::Client, task: &DownloadTask) -> AppResul
     if is_valid(task) {
         return Ok(());
     }
+    // Fichier sans adresse : il est fabriqué sur place (installeur Forge), on ne peut pas le
+    // retélécharger.
+    if task.url.is_empty() {
+        return Err(AppError::Other(format!(
+            "fichier manquant : {} (relance le jeu pour réinstaller le loader)",
+            task.dest.display()
+        )));
+    }
     if let Some(parent) = task.dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -68,6 +76,14 @@ async fn download_one(client: &reqwest::Client, task: &DownloadTask) -> AppResul
     let tmp = task.dest.with_extension("part");
     std::fs::write(&tmp, &bytes)?;
     std::fs::rename(&tmp, &task.dest)?;
+    Ok(())
+}
+
+/// Télécharge quelques fichiers l'un après l'autre, sans événement de progression.
+pub async fn download_quiet(client: &reqwest::Client, tasks: Vec<DownloadTask>) -> AppResult<()> {
+    for task in &tasks {
+        download_one(client, task).await?;
+    }
     Ok(())
 }
 

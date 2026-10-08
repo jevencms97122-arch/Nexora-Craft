@@ -128,6 +128,44 @@ pub fn list_installed(instance_id: &str) -> AppResult<Vec<InstalledContent>> {
     load_manifest(instance_id)
 }
 
+/// Préfixe des contenus ajoutés depuis un fichier du disque : ils n'existent pas sur Modrinth.
+const LOCAL_PREFIX: &str = "local:";
+
+/// Ajoute à une instance un fichier déjà présent sur le disque (téléchargé à la main), et le fait
+/// apparaître dans la liste de ses contenus.
+pub fn add_local(
+    instance_id: &str,
+    source: &std::path::Path,
+    content_type: ContentType,
+    title: &str,
+) -> AppResult<InstalledContent> {
+    let file_name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| AppError::Other("nom de fichier invalide".into()))?;
+    let entry = InstalledContent {
+        project_id: format!("{LOCAL_PREFIX}{file_name}"),
+        version_id: "local".to_string(),
+        title: title.to_string(),
+        icon_url: None,
+        content_type,
+        file_name,
+        disabled: false,
+    };
+    let dest = entry.path(instance_id);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, &dest)?;
+
+    let mut items = load_manifest(instance_id)?;
+    // Même fichier réimporté : l'ancienne entrée est remplacée.
+    items.retain(|i| i.project_id != entry.project_id);
+    items.push(entry.clone());
+    save_manifest(instance_id, &items)?;
+    Ok(entry)
+}
+
 /// Recherche Modrinth pour un type de contenu. `mc_version`/`loader` sont optionnels
 /// (recherche globale, non liée à une instance précise).
 pub async fn search(
@@ -278,7 +316,7 @@ pub async fn check_updates(client: &reqwest::Client, instance_id: &str) -> AppRe
     let instance = instances::get(instance_id)?;
     let items: Vec<InstalledContent> = load_manifest(instance_id)?
         .into_iter()
-        .filter(|i| i.content_type != ContentType::Modpack)
+        .filter(|i| i.content_type != ContentType::Modpack && !i.project_id.starts_with(LOCAL_PREFIX))
         .collect();
 
     let checks = items.iter().map(|item| {

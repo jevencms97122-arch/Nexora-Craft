@@ -69,12 +69,13 @@ export function FriendsPanel() {
     return (
       <section className="empty-state max-w-3xl">
         <Icon name="users" className="w-8 h-8 text-text-faint" />
-        <div className="section-title text-text">Un compte Nexora est nécessaire</div>
+        <div className="section-title text-text">Tu n'es pas connecté à un compte Nexora</div>
         <p className="text-sm max-w-md">
-          Crée ton compte pour réserver ton pseudo, ajouter tes amis et voir quand ils jouent.
+          Avoir un pseudo dans le launcher ne suffit pas : pour ajouter des amis et voir quand ils jouent, il faut
+          être connecté à ton compte Nexora (e-mail et mot de passe) sur ce launcher.
         </p>
         <Link to="/account" className="btn btn-primary">
-          <Icon name="user" className="w-4 h-4" /> Créer mon compte
+          <Icon name="user" className="w-4 h-4" /> Me connecter ou créer mon compte
         </Link>
       </section>
     );

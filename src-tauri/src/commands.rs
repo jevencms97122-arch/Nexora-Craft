@@ -11,6 +11,7 @@ use crate::modrinth::{ProjectVersion, SearchResponse};
 use crate::screenshots::{self, Screenshot};
 use crate::servers::{self, Server, ServerStatus};
 use crate::settings::{self, Settings};
+use crate::minecraft::forge::ForgeKind;
 use crate::share::{self, ImportResult, SharedInstance};
 use crate::skins::{self, WardrobeSkin};
 use crate::state::AppState;
@@ -26,15 +27,31 @@ pub fn list_instances() -> AppResult<Vec<Instance>> {
 pub async fn create_instance(state: State<'_, AppState>, new_instance: NewInstance) -> AppResult<Instance> {
     let loader = new_instance.loader.clone();
     let mc_version = new_instance.mc_version.clone();
-    let mut instance = instances::create(new_instance)?;
 
-    if let Some(kind) = loader_kind_for(&loader) {
-        let version = minecraft::loaders::resolve_recommended_version(&state.http, kind, &mc_version).await?;
-        instance.loader_version = Some(version);
+    // La version du loader est cherchée avant de créer l'instance : si le loader n'existe pas pour
+    // cette version de Minecraft, rien n'est créé.
+    let loader_version = if let Some(kind) = loader_kind_for(&loader) {
+        Some(minecraft::loaders::resolve_recommended_version(&state.http, kind, &mc_version).await?)
+    } else if let Some(kind) = forge_kind_for(&loader) {
+        Some(minecraft::forge::resolve_recommended_version(&state.http, kind, &mc_version).await?)
+    } else {
+        None
+    };
+
+    let mut instance = instances::create(new_instance)?;
+    if loader_version.is_some() {
+        instance.loader_version = loader_version;
         instance = instances::update(instance)?;
     }
-
     Ok(instance)
+}
+
+fn forge_kind_for(loader: &Loader) -> Option<ForgeKind> {
+    match loader {
+        Loader::Forge => Some(ForgeKind::Forge),
+        Loader::NeoForge => Some(ForgeKind::NeoForge),
+        _ => None,
+    }
 }
 
 fn loader_kind_for(loader: &Loader) -> Option<LoaderKind> {
@@ -224,6 +241,32 @@ pub async fn launch_instance(
     }
 
     let java_path = crate::java::ensure_java(&state.http, detail.java_version.major_version).await?;
+
+    if let Some(kind) = forge_kind_for(&instance.loader) {
+        // Contrairement à Fabric, la version reste celle choisie à la création : les mods Forge
+        // sont souvent liés à une version précise du loader.
+        let loader_version = match instance.loader_version.clone() {
+            Some(version) => version,
+            None => {
+                let version =
+                    minecraft::forge::resolve_recommended_version(&state.http, kind, &instance.mc_version).await?;
+                instance.loader_version = Some(version.clone());
+                instance = instances::update(instance)?;
+                version
+            }
+        };
+        let profile = minecraft::forge::ensure_installed(
+            Some(&app),
+            &state.http,
+            &instance.id,
+            kind,
+            &instance.mc_version,
+            &loader_version,
+            &java_path,
+        )
+        .await?;
+        minecraft::forge::apply(&mut detail, profile);
+    }
 
     let (client_jar, libs) =
         minecraft::install::install_version(&app, &state.http, &instance.id, &detail).await?;
@@ -483,6 +526,68 @@ pub async fn import_instance_code(
 }
 
 // ---------- Garde-robe ----------
+
+// ---------- Import de fichiers téléchargés (CurseForge) ----------
+
+const CURSEFORGE_WINDOW: &str = "curseforge";
+const CURSEFORGE_URL: &str = "https://www.curseforge.com/minecraft";
+
+/// Ouvre CurseForge dans une fenêtre du launcher (ou la ramène devant si elle existe déjà).
+///
+/// Cette fenêtre affiche un site extérieur : elle n'a accès à aucune commande du launcher (les
+/// permissions ne sont accordées qu'à la fenêtre principale). Ses téléchargements vont dans le
+/// dossier Téléchargements, et chaque fichier terminé est signalé à l'interface.
+#[tauri::command]
+pub async fn open_curseforge(app: AppHandle) -> AppResult<()> {
+    use tauri::webview::DownloadEvent;
+    use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+
+    if let Some(window) = app.get_webview_window(CURSEFORGE_WINDOW) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let url = CURSEFORGE_URL.parse().map_err(|_| AppError::Other("adresse CurseForge invalide".into()))?;
+    let events = app.clone();
+    WebviewWindowBuilder::new(&app, CURSEFORGE_WINDOW, WebviewUrl::External(url))
+        .title("CurseForge · Nexora Craft")
+        .inner_size(1180.0, 800.0)
+        .min_inner_size(800.0, 560.0)
+        .on_download(move |_webview, event| {
+            if let DownloadEvent::Finished { path: Some(path), success: true, .. } = event {
+                let _ = events.emit("curseforge-download", path.to_string_lossy().to_string());
+            }
+            // Dans tous les cas, le téléchargement suit son cours normal.
+            true
+        })
+        .build()
+        .map_err(|e| AppError::Other(format!("impossible d'ouvrir la fenêtre CurseForge : {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn scan_downloads(since_ms: u64) -> AppResult<Vec<crate::imports::DownloadedFile>> {
+    crate::imports::scan(since_ms)
+}
+
+/// Analyse un fichier téléchargé, et ramène le launcher au premier plan pour poser la question.
+#[tauri::command]
+pub fn inspect_download(app: AppHandle, path: String) -> AppResult<crate::imports::FileInfo> {
+    use tauri::Manager;
+    let info = crate::imports::inspect(&path)?;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn install_download(path: String, instance_id: String) -> AppResult<InstalledContent> {
+    crate::imports::install(&path, &instance_id)
+}
 
 #[tauri::command]
 pub fn list_game_music() -> AppResult<Vec<crate::music::GameTrack>> {

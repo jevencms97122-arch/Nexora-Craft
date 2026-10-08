@@ -5,6 +5,8 @@ import type {
   AiReport,
   ContentType,
   ContentUpdate,
+  DownloadedFile,
+  ImportedFile,
   ImportResult,
   InstallResult,
   Screenshot,
@@ -161,6 +163,12 @@ export const api = {
     invoke<ImportResult>("import_instance_code", { code, name }),
 
   listWardrobe: () => invoke<WardrobeSkin[]>("list_wardrobe"),
+  /// Ouvre CurseForge dans une fenêtre du launcher.
+  openCurseForge: () => invoke<void>("open_curseforge"),
+  /// Fichiers .jar/.zip apparus dans Téléchargements depuis `sinceMs`.
+  scanDownloads: (sinceMs: number) => invoke<DownloadedFile[]>("scan_downloads", { sinceMs }),
+  inspectDownload: (path: string) => invoke<ImportedFile>("inspect_download", { path }),
+  installDownload: (path: string, instanceId: string) => invoke<InstalledContent>("install_download", { path, instanceId }),
   /// Musiques trouvées dans les fichiers du jeu déjà téléchargés.
   listGameMusic: () => invoke<{ id: string; name: string; path: string }[]>("list_game_music"),
   removeWardrobeSkin: (id: string) => invoke<void>("remove_wardrobe_skin", { id }),

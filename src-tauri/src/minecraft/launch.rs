@@ -27,7 +27,7 @@ pub struct GameExited {
     pub code: Option<i32>,
 }
 
-fn extract_natives(natives_jars: &[PathBuf], target_dir: &Path) -> AppResult<()> {
+pub(crate) fn extract_natives(natives_jars: &[PathBuf], target_dir: &Path) -> AppResult<()> {
     std::fs::create_dir_all(target_dir)?;
     for jar in natives_jars {
         let file = std::fs::File::open(jar)?;
@@ -91,22 +91,18 @@ fn supports_quick_play(mc_version: &str) -> bool {
     }
 }
 
-pub async fn launch(
-    app: &AppHandle,
-    java_path: &Path,
+/// Construit tous les arguments passés à Java : options de la JVM, classe principale, puis
+/// arguments du jeu.
+pub fn build_args(
     instance: &Instance,
     detail: &VersionDetail,
     client_jar: &Path,
     libs: &ResolvedLibraries,
     account: &Account,
     server: Option<&str>,
-) -> AppResult<()> {
-    let instance_dir = paths::instance_dir(&instance.id);
-    let natives_dir = paths::app_data_dir()
-        .join("natives")
-        .join(&instance.id);
-    extract_natives(&libs.natives_jars, &natives_dir)?;
-
+    instance_dir: &Path,
+    natives_dir: &Path,
+) -> Vec<String> {
     let mut classpath: Vec<String> = libs
         .classpath
         .iter()
@@ -138,6 +134,9 @@ pub async fn launch(
     placeholders.insert("launcher_name", "NexoraCraft".to_string());
     placeholders.insert("launcher_version", "0.1.0".to_string());
     placeholders.insert("classpath", classpath_str.clone());
+    // Utilisés par Forge et NeoForge pour désigner leurs modules.
+    placeholders.insert("library_directory", paths::libraries_cache_dir().display().to_string());
+    placeholders.insert("classpath_separator", ";".to_string());
 
     let mut jvm_args = vec![
         format!("-Xms{}M", instance.min_ram_mb),
@@ -181,6 +180,26 @@ pub async fn launch(
     let mut full_args = jvm_args;
     full_args.push(detail.main_class.clone());
     full_args.extend(game_args);
+    full_args
+}
+
+pub async fn launch(
+    app: &AppHandle,
+    java_path: &Path,
+    instance: &Instance,
+    detail: &VersionDetail,
+    client_jar: &Path,
+    libs: &ResolvedLibraries,
+    account: &Account,
+    server: Option<&str>,
+) -> AppResult<()> {
+    let instance_dir = paths::instance_dir(&instance.id);
+    let natives_dir = paths::app_data_dir()
+        .join("natives")
+        .join(&instance.id);
+    extract_natives(&libs.natives_jars, &natives_dir)?;
+
+    let full_args = build_args(instance, detail, client_jar, libs, account, server, &instance_dir, &natives_dir);
 
     std::fs::create_dir_all(&instance_dir)?;
     crate::skins::sync_offline_pack(&instance_dir, account)?;

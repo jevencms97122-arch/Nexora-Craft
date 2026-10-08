@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { InstallModpackModal } from "../components/InstallModpackModal";
 import { InstallToInstanceModal } from "../components/InstallToInstanceModal";
+import { CurseForgePanel } from "../components/CurseForgePanel";
 import { Icon, PageHeader, Skeleton, Spinner } from "../components/ui";
+import { useImportStore } from "../store/importStore";
 import { api } from "../lib/api";
 import type { ContentType, Favorite, ModrinthHit } from "../lib/types";
 import { useInstanceStore } from "../store/instanceStore";
@@ -39,6 +41,9 @@ function formatDownloads(n: number) {
 
 export function ContentPage() {
   const { instances, refresh } = useInstanceStore();
+  /// Source du contenu : la recherche Modrinth intégrée, ou le site CurseForge dans le navigateur.
+  const [source, setSource] = useState<"modrinth" | "curseforge">("modrinth");
+  const watching = useImportStore((s) => s.watching);
   const [tab, setTab] = useState<ContentType | "favorites">("mod");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ModrinthHit[]>([]);
@@ -119,11 +124,31 @@ export function ContentPage() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Modrinth"
+        eyebrow={source === "modrinth" ? "Modrinth" : "CurseForge"}
         title="Explorer"
         subtitle="Mods, shaders, packs de textures et modpacks, installés en un clic dans tes instances."
+        actions={
+          <div className="flex rounded-xl bg-panel-2 border border-border-strong p-1">
+            {(["modrinth", "curseforge"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={`px-4 h-8 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 ${
+                  source === s ? "bg-accent text-accent-ink" : "text-text-muted hover:text-text"
+                }`}
+              >
+                {s === "modrinth" ? "Modrinth" : "CurseForge"}
+                {s === "curseforge" && watching && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
+              </button>
+            ))}
+          </div>
+        }
       />
 
+      {source === "curseforge" ? (
+        <CurseForgePanel />
+      ) : (
+        <>
       <div className="flex gap-2 flex-wrap">
         {TABS.map((t) => (
           <button key={t.type} onClick={() => setTab(t.type)} className={`chip ${tab === t.type ? "chip-active" : ""}`}>
@@ -299,6 +324,8 @@ export function ContentPage() {
               </button>
             </nav>
           )}
+        </>
+      )}
         </>
       )}
 

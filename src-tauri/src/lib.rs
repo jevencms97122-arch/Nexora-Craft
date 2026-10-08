@@ -7,6 +7,7 @@ mod content;
 mod download;
 mod error;
 mod favorites;
+mod imports;
 mod instances;
 mod java;
 mod minecraft;
@@ -94,6 +95,10 @@ pub fn run() {
             commands::import_instance_code,
             commands::list_wardrobe,
             commands::list_game_music,
+            commands::open_curseforge,
+            commands::scan_downloads,
+            commands::inspect_download,
+            commands::install_download,
             commands::remove_wardrobe_skin,
             commands::apply_wardrobe_skin,
         ])

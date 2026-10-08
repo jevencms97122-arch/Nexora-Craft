@@ -140,6 +140,9 @@ pub struct VersionDetail {
     pub arguments: Option<Arguments>,
     #[serde(default, rename = "minecraftArguments")]
     pub minecraft_arguments: Option<String>,
+    /// Nom imposé au jar du client (Forge et NeoForge l'exigent) ; « client.jar » par défaut.
+    #[serde(skip)]
+    pub client_jar_name: Option<String>,
 }
 
 pub async fn fetch_version_detail(client: &reqwest::Client, entry: &VersionEntry) -> AppResult<VersionDetail> {

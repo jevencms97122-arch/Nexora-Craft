@@ -84,7 +84,7 @@ pub async fn install_version(
 ) -> AppResult<(PathBuf, ResolvedLibraries)> {
     let versions_dir = paths::versions_cache_dir().join(&detail.id);
     std::fs::create_dir_all(&versions_dir)?;
-    let client_jar = versions_dir.join("client.jar");
+    let client_jar = versions_dir.join(detail.client_jar_name.as_deref().unwrap_or("client.jar"));
 
     let mut tasks = vec![DownloadTask {
         url: detail.downloads.client.url.clone(),

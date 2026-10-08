@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isValidUsername } from "../lib/format";
+import { SUPABASE_URL, supabase } from "../lib/supabase";
 import { useAccountStore } from "../store/accountStore";
 import { useCloudStore } from "../store/cloudStore";
 import { toast } from "../store/toastStore";
@@ -18,6 +19,23 @@ export function CloudAccount() {
   const [username, setUsername] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Le pseudo du compte local a déjà un compte Nexora (créé sur un autre PC, ou avant une
+  // réinstallation) : on ouvre directement la connexion au lieu de proposer une inscription.
+  const [reserved, setReserved] = useState(false);
+  const signedIn = !!session;
+  useEffect(() => {
+    if (signedIn || !isValidUsername(activeName)) return;
+    let cancelled = false;
+    supabase.rpc("username_available", { p_username: activeName }).then(({ data, error }) => {
+      if (cancelled || error || data !== false) return;
+      setReserved(true);
+      setMode("signin");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeName, signedIn]);
 
   // Par défaut, on propose de réserver le pseudo du compte actif.
   const name = username ?? activeName;
@@ -68,6 +86,20 @@ export function CloudAccount() {
         <p className="text-[11px] text-text-faint leading-relaxed">
           Ce pseudo t'est réservé. Ton skin est publié en ligne et tes amis voient quand tu joues.
         </p>
+        {profile.skin_updated_at && (
+          <button
+            onClick={async () => {
+              await navigator.clipboard.writeText(
+                `/skin url "${SUPABASE_URL}/storage/v1/object/public/skins/${profile.id}.png"`,
+              );
+              toast.success("Commande copiée : colle-la dans le tchat du serveur");
+            }}
+            title="Sur un serveur équipé du plugin SkinsRestorer, cette commande affiche ton skin à tous les joueurs"
+            className="btn btn-secondary btn-sm self-start"
+          >
+            <Icon name="copy" className="w-3.5 h-3.5" /> Copier la commande de skin
+          </button>
+        )}
         <button
           onClick={async () => {
             await signOut();
@@ -158,6 +190,13 @@ export function CloudAccount() {
           </button>
         ))}
       </div>
+
+      {reserved && mode === "signin" && (
+        <div className="text-xs text-text-muted bg-panel-2 rounded-xl px-4 py-3 leading-relaxed">
+          Le pseudo <span className="text-text font-medium">{activeName}</span> a déjà un compte Nexora, mais tu
+          n'y es pas connecté sur ce launcher. Connecte-toi avec l'e-mail et le mot de passe de ce compte.
+        </div>
+      )}
 
       {mode === "signup" && (
         <div>

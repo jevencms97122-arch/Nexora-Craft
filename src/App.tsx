@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { CommandPalette } from "./components/CommandPalette";
 import { CrashModal } from "./components/CrashModal";
+import { ImportModal } from "./components/ImportModal";
 import { MinecraftScene } from "./components/MinecraftScene";
 import { Onboarding, needsOnboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
@@ -164,6 +165,7 @@ function AppShell() {
         </main>
       </div>
       <CrashModal />
+      <ImportModal />
       <CommandPalette />
       <UpdatePrompt />
       <Toasts />

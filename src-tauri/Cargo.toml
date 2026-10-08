@@ -1,6 +1,6 @@
 [package]
 name = "nexora-craft"
-version = "0.1.1"
+version = "0.1.2"
 description = "Nexora Craft - Minecraft Launcher"
 authors = ["Nexora Craft"]
 edition = "2021"

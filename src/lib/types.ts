@@ -202,3 +202,25 @@ export interface AiReport {
   explanation: string;
   suggestions: string[];
 }
+
+// ---------- Import de fichiers téléchargés (CurseForge) ----------
+
+export interface DownloadedFile {
+  path: string;
+  name: string;
+  size: number;
+}
+
+export type ImportKind = "mod" | "resourcepack" | "shader" | "datapack" | "modpack" | "unknown";
+export type ImportVerdict = "ok" | "no" | "unknown";
+
+export interface ImportedFile {
+  path: string;
+  file_name: string;
+  kind: ImportKind;
+  title: string;
+  loaders: string[];
+  /// Versions de Minecraft annoncées par le fichier, telles qu'il les écrit.
+  minecraft: string | null;
+  compat: { instance_id: string; verdict: ImportVerdict; reason: string }[];
+}
