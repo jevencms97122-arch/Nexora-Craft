@@ -9,13 +9,16 @@ use crate::error::{AppError, AppResult};
 use crate::instances::{self, Instance, NewInstance};
 use crate::paths;
 
+/// Même projet et même clé « publishable » que côté interface (voir src/lib/supabase.ts).
+const SUPABASE_URL: &str = "https://vmaketngbwbuscynjkac.supabase.co";
+const SUPABASE_KEY: &str = "sb_publishable_kKuXBqvQ6XwEejoOQYHF7Q_5tIvP_rw";
 const DEFAULT_PORT: u16 = 25565;
 const PING_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Serveur officiel du launcher : toujours présent en tête de liste, impossible à retirer.
 const OFFICIAL_ID: &str = "nexora-smp";
 const OFFICIAL_NAME: &str = "Nexora-SMP";
-const OFFICIAL_ADDRESS: &str = "92.49.99.59:25565";
+const OFFICIAL_ADDRESS: &str = "nexora-smp.duckdns.org:25565";
 /// Pack officiel du serveur, sous forme de code de partage (version, loader, mods et shaders).
 /// L'instance « Nexora-SMP » est créée à partir de lui. Pour publier un nouveau pack : génère un
 /// code depuis une instance (« Partager par code ») et remplace celui-ci ; les instances déjà
@@ -267,16 +270,41 @@ fn load_dedicated() -> Option<Dedicated> {
     })
 }
 
+/// Pack officiel publié dans la base en ligne (table `server_pack`), s'il est joignable.
+async fn fetch_pack_code(client: &reqwest::Client) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Row {
+        code: String,
+    }
+    let res = client
+        .get(format!("{SUPABASE_URL}/rest/v1/server_pack?id=eq.{OFFICIAL_ID}&select=code"))
+        .header("apikey", SUPABASE_KEY)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let rows: Vec<Row> = res.json().await.ok()?;
+    rows.into_iter().next().map(|r| r.code)
+}
+
 /// Retourne l'instance réservée au serveur officiel, en la créant au premier appel à partir du
 /// pack officiel (version, loader, mods, shaders). Si le pack a changé depuis, ou si une
 /// installation précédente était incomplète, l'instance existante est remise à niveau.
 pub async fn ensure_official_instance(app: &tauri::AppHandle, client: &reqwest::Client) -> AppResult<Instance> {
-    let pack = crate::share::decode(OFFICIAL_PACK_CODE)?;
+    // Le pack vient de la base en ligne : le propriétaire du serveur y ajoute des mods sans
+    // publier de nouvelle version du launcher. Hors ligne, le pack intégré sert de repli.
+    let code = fetch_pack_code(client).await.unwrap_or_else(|| OFFICIAL_PACK_CODE.to_string());
+    let pack = crate::share::decode(&code).or_else(|_| crate::share::decode(OFFICIAL_PACK_CODE))?;
+    let code = if crate::share::decode(&code).is_ok() { code } else { OFFICIAL_PACK_CODE.to_string() };
     let saved = load_dedicated();
+    let old_pack = saved.as_ref().and_then(|d| d.pack_code.as_deref()).and_then(|c| crate::share::decode(c).ok());
 
     let existing = saved.as_ref().and_then(|d| instances::get(&d.instance_id).ok());
     if let (Some(instance), Some(saved)) = (&existing, &saved) {
-        if saved.pack_code.as_deref() == Some(OFFICIAL_PACK_CODE) {
+        if saved.pack_code.as_deref() == Some(code.as_str()) {
             return Ok(instance.clone());
         }
     }
@@ -298,10 +326,10 @@ pub async fn ensure_official_instance(app: &tauri::AppHandle, client: &reqwest::
     let mut record = Dedicated { instance_id: instance.id.clone(), pack_code: None };
     fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
 
-    let result = crate::share::install_items(app, client, instance, &pack).await?;
+    let result = crate::share::sync_items(app, client, instance, old_pack.as_ref(), &pack).await?;
     // Le pack n'est noté comme installé que s'il l'est en entier : sinon on réessaiera.
     if result.failed.is_empty() {
-        record.pack_code = Some(OFFICIAL_PACK_CODE.to_string());
+        record.pack_code = Some(code);
         fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
     }
     Ok(result.instance)

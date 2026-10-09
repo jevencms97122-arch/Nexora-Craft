@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AccountSkin3D } from "../components/AccountSkin";
 import { HomeCarousel } from "../components/HomeCarousel";
+import { HomeFriends } from "../components/HomeFriends";
 import {
   AnimatedText,
   Dropdown,
@@ -67,7 +68,10 @@ export function PlayPage() {
   const percent = progressPercent(progress);
 
   return (
-    <div className="min-h-full w-full box-border flex flex-col pt-6 pb-8 gap-8">
+    <div className="relative min-h-full w-full box-border flex flex-col pt-6 pb-8 gap-8">
+      <div className="absolute top-4 right-5 z-20 rise" style={{ animationDelay: "0.6s" }}>
+        <HomeFriends />
+      </div>
       {/* Hero */}
       {/* Le skin se tient juste à côté du titre ; la moitié droite reste libre pour la scène. */}
       <section className="flex-1 flex items-center gap-12 min-h-[380px] w-full max-w-[1480px] mx-auto px-10 box-border">

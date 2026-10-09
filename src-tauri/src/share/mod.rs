@@ -180,6 +180,37 @@ pub async fn install_items(
     Ok(ImportResult { instance, failed })
 }
 
+/// Met une instance à jour vers un nouveau pack sans tout retélécharger : seuls les contenus
+/// absents ou d'une autre version sont installés, et ceux que l'ancien pack apportait mais que le
+/// nouveau n'a plus sont retirés. Les contenus ajoutés par le joueur lui-même ne sont pas touchés.
+pub async fn sync_items(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    instance: Instance,
+    old: Option<&SharedInstance>,
+    new: &SharedInstance,
+) -> AppResult<ImportResult> {
+    let installed = content::list_installed(&instance.id)?;
+    if let Some(old) = old {
+        for item in &old.items {
+            let still_wanted = new.items.iter().any(|n| n.project_id == item.project_id);
+            if !still_wanted && installed.iter().any(|i| i.project_id == item.project_id) {
+                let _ = content::remove(&instance.id, &item.project_id);
+            }
+        }
+    }
+    let missing = SharedInstance {
+        items: new
+            .items
+            .iter()
+            .filter(|n| !installed.iter().any(|i| i.project_id == n.project_id && i.version_id == n.version_id))
+            .cloned()
+            .collect(),
+        ..new.clone()
+    };
+    install_items(app, client, instance, &missing).await
+}
+
 pub fn new_instance(shared: &SharedInstance, name: &str) -> NewInstance {
     NewInstance {
         name: if name.trim().is_empty() { shared.name.clone() } else { name.trim().to_string() },
