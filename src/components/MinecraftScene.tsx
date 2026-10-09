@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { LOW_END } from "../lib/perf";
 import type { Theme } from "../store/themeStore";
 
 /*
@@ -19,8 +20,11 @@ import type { Theme } from "../store/themeStore";
 const W = 320;
 const H = 180;
 const GROUND = 148;
-const FRAME_MS = 40; // ~25 images/s : fluide pour du pixel-art, léger pour le GPU.
-const MAX_RES = 1.5; // facteur max appliqué à devicePixelRatio pour le canvas haute résolution.
+const FRAME_MS = LOW_END ? 66 : 40; // ~25 images/s (15 sur PC modeste) : fluide pour du pixel-art, léger pour le GPU.
+/// Derrière un fond très flou (hors page Jouer), le mouvement ne se voit plus : très peu d'images.
+const CALM_FRAME_MS = 200;
+const MAX_RES_FULL = 1.5;
+const MAX_RES = LOW_END ? 1 : MAX_RES_FULL; // facteur max appliqué à devicePixelRatio pour le canvas haute résolution.
 
 const FIRE_X = 152;
 const DOG_X = 124;
@@ -65,6 +69,211 @@ const TAIL_FRAMES = [
   [[3, 9], [2, 8], [1, 8]],
   [[3, 9], [2, 9], [1, 10]],
 ];
+
+// ---------- Biomes ----------
+
+/*
+ * Un biome change le décor sans toucher à la mise en scène : la maison, le chien, le feu de camp,
+ * l'étang et la clôture restent à la même place. Seuls varient les couleurs du relief et du sol,
+ * les arbres, la végétation, l'eau et quelques détails (neige sur le toit, pétales, lucioles...).
+ */
+export type Biome = "plains" | "snow" | "desert" | "cherry" | "swamp" | "mushroom";
+
+export const BIOMES: { id: Biome; name: string; hint: string }[] = [
+  { id: "plains", name: "Plaine", hint: "Chênes, fleurs et étang" },
+  { id: "snow", name: "Taïga enneigée", hint: "Sapins, neige et étang gelé" },
+  { id: "desert", name: "Désert", hint: "Cactus, dunes et oasis" },
+  { id: "cherry", name: "Cerisiers", hint: "Arbres roses et pluie de pétales" },
+  { id: "swamp", name: "Marais", hint: "Lianes, eau trouble et lucioles" },
+  { id: "mushroom", name: "Champignons", hint: "Champignons géants et spores" },
+];
+
+type TreeKind = "oak" | "spruce" | "cactus" | "mushroom";
+
+interface LeafPalette {
+  light: string;
+  mid: string;
+  dark: string;
+  shade: string;
+  shine: string;
+  /// Couleur des feuilles qui frémissent au vent.
+  flash: string;
+}
+
+interface HousePalette {
+  wall: string;
+  wallSeam: string;
+  wallJoint: string;
+  wallNoise: string;
+  roof: string;
+  roofAlt: string;
+  roofLight: string;
+  roofEdge: string;
+}
+
+interface BiomeDef {
+  mountain: { rock: string; light: string; dark: string; cap: string | null; capBelow: number; strata?: string };
+  farHill: [string, string];
+  nearHill: [string, string];
+  turf: { top: [string, string]; under: [string, string]; drip: [string, string] };
+  soil: string[];
+  water: { surface: string; top: string; deep: string; glint: string; glintDeep: string };
+  /// Étang gelé : pas de reflets mouvants.
+  frozen: boolean;
+  lilies: boolean;
+  tree: TreeKind;
+  /// Position et hauteur de chaque arbre.
+  trees: [number, number][];
+  /// Lianes sous le feuillage (marais).
+  vines: boolean;
+  leaf: LeafPalette;
+  /// Ce qui tombe des arbres (feuilles, pétales, spores) : deux couleurs « r,g,b » et l'intervalle
+  /// entre deux chutes, en secondes. `null` : rien ne tombe.
+  falling: { colors: [string, string]; every: [number, number] } | null;
+  blades: { count: number; colors: [string, string]; flowers: string[]; flowerChance: number };
+  house: HousePalette;
+  /// Neige posée sur le toit, la cheminée, la clôture et les rebords.
+  snowy: boolean;
+  butterflies: boolean;
+  /// 0 à 1 : présence des lucioles la nuit.
+  fireflies: number;
+  /// Ce que devient la pluie ici : neige en montagne, rien dans le désert.
+  rain: Weather;
+}
+
+const WOOD_HOUSE: HousePalette = {
+  wall: "#b48a52",
+  wallSeam: "#8d6a3a",
+  wallJoint: "#9c7744",
+  wallNoise: "#a67f4a",
+  roof: "#5b3c22",
+  roofAlt: "#4a3220",
+  roofLight: "#6f4a2a",
+  roofEdge: "#3b2716",
+};
+
+const OAK_LEAVES: LeafPalette = { light: "#6cbf45", mid: "#57a83a", dark: "#438f2e", shade: "#3a7a28", shine: "#7dcf52", flash: "#86d35a" };
+const DIRT = ["#866043", "#79573b", "#6b4a32", "#866043", "#8d6748"];
+const BLUE_WATER = { surface: "#5b93f2", top: "#3f76e4", deep: "#26479c", glint: "#b8d4ff", glintDeep: "#7aa6f5" };
+const STANDARD_TREES: [number, number][] = [[28, 15], [52, 11], [292, 17], [312, 12]];
+
+const PLAINS: BiomeDef = {
+  mountain: { rock: "#8193ab", light: "#97a8bf", dark: "#72849c", cap: "#eef4ff", capBelow: 86 },
+  farHill: ["#7fb874", "#93c886"],
+  nearHill: ["#5e9e50", "#70b25f"],
+  turf: { top: ["#72b842", "#64a838"], under: ["#5a9a30", "#4f8a2c"], drip: ["#4f8a2c", "#4a7f2a"] },
+  soil: DIRT,
+  water: BLUE_WATER,
+  frozen: false,
+  lilies: true,
+  tree: "oak",
+  trees: STANDARD_TREES,
+  vines: false,
+  leaf: OAK_LEAVES,
+  falling: { colors: ["122,190,72", "196,160,62"], every: [1.8, 3] },
+  blades: { count: 70, colors: ["#5aa83d", "#4f9636"], flowers: ["#e33b3b", "#f5d142", "#9b6bff", "#ffffff", "#e84f9b"], flowerChance: 0.3 },
+  house: WOOD_HOUSE,
+  snowy: false,
+  butterflies: true,
+  fireflies: 1,
+  rain: "rain",
+};
+
+const BIOME_DEFS: Record<Biome, BiomeDef> = {
+  plains: PLAINS,
+  snow: {
+    ...PLAINS,
+    mountain: { rock: "#93a3b8", light: "#aab9cc", dark: "#8292a8", cap: "#f4f8ff", capBelow: 200 },
+    farHill: ["#dfe8f2", "#f4f8ff"],
+    nearHill: ["#c9d6e6", "#e6eef8"],
+    turf: { top: ["#ffffff", "#eef4fb"], under: ["#e1eaf5", "#d3dfee"], drip: ["#c5d3e6", "#b9c9df"] },
+    water: { surface: "#d6ecff", top: "#a9d2f5", deep: "#6fa3d8", glint: "#ffffff", glintDeep: "#c4e0fa" },
+    frozen: true,
+    lilies: false,
+    tree: "spruce",
+    trees: [[28, 22], [52, 16], [292, 25], [312, 18]],
+    leaf: { light: "#3f7a4a", mid: "#2f6340", dark: "#254f35", shade: "#1f432d", shine: "#4a8a55", flash: "#5a9a64" },
+    falling: null,
+    blades: { count: 24, colors: ["#7c8f6a", "#6a7d5c"], flowers: [], flowerChance: 0 },
+    snowy: true,
+    butterflies: false,
+    fireflies: 0,
+    rain: "snow",
+  },
+  desert: {
+    ...PLAINS,
+    mountain: { rock: "#c98a5a", light: "#dba06c", dark: "#b0723f", cap: null, capBelow: 0, strata: "#a8623a" },
+    farHill: ["#e2c98a", "#eed9a2"],
+    nearHill: ["#d4b672", "#e3c888"],
+    turf: { top: ["#ecd9a0", "#e3cd8e"], under: ["#dcc483", "#d2b976"], drip: ["#d2b976", "#c9ae6a"] },
+    soil: ["#d8c184", "#cdb577", "#c2a96a", "#d8c184", "#dcc88e"],
+    water: { surface: "#6fd0f0", top: "#3aa0d6", deep: "#1f6fa8", glint: "#d4f4ff", glintDeep: "#7cc8ee" },
+    lilies: false,
+    tree: "cactus",
+    trees: [[28, 13], [52, 8], [292, 14], [312, 9]],
+    falling: null,
+    blades: { count: 22, colors: ["#9a7a45", "#84683a"], flowers: [], flowerChance: 0 },
+    house: {
+      wall: "#dcc68c",
+      wallSeam: "#bfa56a",
+      wallJoint: "#cdb67a",
+      wallNoise: "#d2bd82",
+      roof: "#b5623a",
+      roofAlt: "#9c5230",
+      roofLight: "#c97748",
+      roofEdge: "#7e3f24",
+    },
+    butterflies: false,
+    fireflies: 0,
+    rain: "clear",
+  },
+  cherry: {
+    ...PLAINS,
+    farHill: ["#e7a9c4", "#f3bfd4"],
+    nearHill: ["#6fae5c", "#82c06c"],
+    turf: { top: ["#7cc653", "#6db648"], under: ["#5fa63a", "#549634"], drip: ["#549634", "#4d8a30"] },
+    leaf: { light: "#f9c3da", mid: "#f0a6c5", dark: "#e38bb2", shade: "#d174a0", shine: "#fddbe9", flash: "#ffe6f0" },
+    falling: { colors: ["247,170,205", "255,214,230"], every: [0.45, 0.8] },
+    blades: { count: 84, colors: ["#62b245", "#56a23c"], flowers: ["#f7a8cb", "#ffd0e2", "#ffffff", "#e870a8"], flowerChance: 0.5 },
+  },
+  swamp: {
+    ...PLAINS,
+    mountain: { rock: "#6f8088", light: "#84959c", dark: "#62737a", cap: null, capBelow: 0 },
+    farHill: ["#5c7f5a", "#6c906a"],
+    nearHill: ["#476b45", "#557a52"],
+    turf: { top: ["#5b8a3e", "#4f7c36"], under: ["#466f30", "#3d632b"], drip: ["#3d632b", "#365826"] },
+    soil: ["#5e4a36", "#54412f", "#4a3929", "#5e4a36", "#66513b"],
+    water: { surface: "#7ba67c", top: "#4f7d5c", deep: "#2f5440", glint: "#b6d6b0", glintDeep: "#6a9a78" },
+    vines: true,
+    leaf: { light: "#5f8f3c", mid: "#4d7a32", dark: "#3d6529", shade: "#335722", shine: "#6e9f47", flash: "#7fae55" },
+    falling: { colors: ["95,143,60", "120,110,60"], every: [2.5, 4] },
+    blades: { count: 84, colors: ["#4a7a36", "#3f6c2e"], flowers: ["#5aa9e6", "#8b5a2b", "#c9c15a"], flowerChance: 0.2 },
+    house: {
+      wall: "#8f7046",
+      wallSeam: "#6f5534",
+      wallJoint: "#7d613c",
+      wallNoise: "#856842",
+      roof: "#3f4a2e",
+      roofAlt: "#354026",
+      roofLight: "#566338",
+      roofEdge: "#2a321e",
+    },
+    butterflies: false,
+  },
+  mushroom: {
+    ...PLAINS,
+    mountain: { rock: "#8a7fa0", light: "#9f94b4", dark: "#7a6f90", cap: null, capBelow: 0 },
+    farHill: ["#8f7fa6", "#a292b8"],
+    nearHill: ["#74648c", "#86769c"],
+    turf: { top: ["#8c7a9c", "#7e6c90"], under: ["#72617f", "#665673"], drip: ["#665673", "#5b4c68"] },
+    lilies: false,
+    tree: "mushroom",
+    trees: [[28, 16], [52, 11], [292, 18], [312, 12]],
+    falling: { colors: ["236,150,140", "238,226,214"], every: [1.2, 2] },
+    blades: { count: 40, colors: ["#6f5f80", "#63546f"], flowers: ["#d23a3a", "#b98a5e", "#e8dccb"], flowerChance: 0.45 },
+    butterflies: false,
+  },
+};
 
 // ---------- Utilitaires ----------
 
@@ -221,41 +430,44 @@ function drawSky(ctx: Ctx, env: Env) {
 
 // ---------- Arrière-plans (montagnes, collines) ----------
 
-function drawMountains(ctx: Ctx) {
+function drawMountains(ctx: Ctx, def: BiomeDef) {
+  const m = def.mountain;
   const r = rng(21);
   for (let x = 0; x < W; x += 3) {
     const h = Math.round((88 + Math.sin(x * 0.021 + 0.5) * 15 + Math.sin(x * 0.057) * 6) / 2) * 2;
     for (let y = h; y < GROUND; y++) {
       for (let k = 0; k < 3; k++) {
-        const snow = y < h + 3 && h < 86 && r() > 0.15;
-        let c = "#8193ab";
-        if (snow) c = "#eef4ff";
-        else if (y < h + 2) c = "#97a8bf";
-        else if (r() < 0.12) c = "#72849c";
+        const snow = m.cap !== null && y < h + 3 && h < m.capBelow && r() > 0.15;
+        let c = m.rock;
+        if (snow) c = m.cap!;
+        else if (y < h + 2) c = m.light;
+        // Strates horizontales des plateaux désertiques.
+        else if (m.strata && y % 7 === 0) c = m.strata;
+        else if (r() < 0.12) c = m.dark;
         px(ctx, x + k, y, 1, 1, c);
       }
     }
   }
 }
 
-function drawFarHills(ctx: Ctx) {
+function drawFarHills(ctx: Ctx, def: BiomeDef) {
   for (let x = 0; x < W; x += 4) {
     const h = 114 + Math.round(Math.sin(x * 0.03) * 6 + Math.sin(x * 0.011 + 1) * 8);
-    px(ctx, x, h, 4, GROUND - h, "#7fb874");
-    px(ctx, x, h, 4, 1, "#93c886");
+    px(ctx, x, h, 4, GROUND - h, def.farHill[0]);
+    px(ctx, x, h, 4, 1, def.farHill[1]);
   }
 }
 
-function drawNearHills(ctx: Ctx) {
+function drawNearHills(ctx: Ctx, def: BiomeDef) {
   for (let x = 0; x < W; x += 6) {
     const h = 130 + Math.round(Math.sin(x * 0.05 + 2) * 4 + Math.sin(x * 0.017) * 5);
-    px(ctx, x, h, 6, GROUND - h, "#5e9e50");
-    px(ctx, x, h, 6, 1, "#70b25f");
+    px(ctx, x, h, 6, GROUND - h, def.nearHill[0]);
+    px(ctx, x, h, 6, 1, def.nearHill[1]);
   }
 }
 
 /// Les couches lointaines sont voilées vers la couleur de l'horizon (perspective atmosphérique).
-function buildBackLayer(env: Env) {
+function buildBackLayer(env: Env, def: BiomeDef) {
   const haze = mixRgb(mixRgb(HAZE_DAY, HAZE_NIGHT, env.night), HAZE_DUSK, env.twilight * 0.45);
   const tint = (day: number, night: number) => rgba(haze, day + (night - day) * env.night);
   const out = makeCanvas();
@@ -269,9 +481,9 @@ function buildBackLayer(env: Env) {
     x.fillRect(0, 0, W, H);
     o.drawImage(c, 0, 0);
   };
-  layer(drawMountains, tint(0.55, 0.8));
-  layer(drawFarHills, tint(0.3, 0.76));
-  layer(drawNearHills, tint(0.12, 0.7));
+  layer((c) => drawMountains(c, def), tint(0.55, 0.8));
+  layer((c) => drawFarHills(c, def), tint(0.3, 0.76));
+  layer((c) => drawNearHills(c, def), tint(0.12, 0.7));
   return out;
 }
 
@@ -285,13 +497,15 @@ interface Blade {
 }
 
 interface Foreground {
+  def: BiomeDef;
   canvas: HTMLCanvasElement;
   leaves: Point[];
   canopies: Point[];
   blades: Blade[];
 }
 
-function drawTree(ctx: Ctx, r: () => number, x: number, height: number, leaves: Point[]) {
+function drawTree(ctx: Ctx, r: () => number, x: number, height: number, leaves: Point[], def: BiomeDef) {
+  const leaf = def.leaf;
   const top = GROUND - height;
   px(ctx, x, top, 2, height, "#6b4f2a");
   px(ctx, x, top, 1, height, "#5a4122");
@@ -309,33 +523,126 @@ function drawTree(ctx: Ctx, r: () => number, x: number, height: number, leaves: 
         if (corner && r() < 0.7) continue;
         if (r() < 0.04) continue;
         const shadeT = (dy + 10) / 12;
-        let c = shadeT < 0.35 ? "#6cbf45" : shadeT < 0.75 ? "#57a83a" : "#438f2e";
-        if (r() < 0.18) c = "#3a7a28";
-        else if (r() < 0.08) c = "#7dcf52";
+        let c = shadeT < 0.35 ? leaf.light : shadeT < 0.75 ? leaf.mid : leaf.dark;
+        if (r() < 0.18) c = leaf.shade;
+        else if (r() < 0.08) c = leaf.shine;
         px(ctx, x + dx, top + dy, 1, 1, c);
         leaves.push({ x: x + dx, y: top + dy });
       }
     }
   }
+
+  // Lianes qui pendent sous le feuillage.
+  if (def.vines) {
+    for (let dx = -7; dx <= 8; dx += 2) {
+      if (r() < 0.45) continue;
+      const length = 2 + Math.floor(r() * 5);
+      for (let k = 0; k < length; k++) px(ctx, x + dx, top + 3 + k, 1, 1, k % 2 ? leaf.shade : leaf.dark);
+    }
+  }
 }
 
-function drawHouse(ctx: Ctx, r: () => number) {
+/// Sapin : étages qui s'élargissent vers le bas, coiffés de neige dans les biomes froids.
+function drawSpruce(ctx: Ctx, r: () => number, x: number, height: number, leaves: Point[], def: BiomeDef) {
+  const leaf = def.leaf;
+  const top = GROUND - height;
+  px(ctx, x, GROUND - 4, 2, 4, "#5a4122");
+  px(ctx, x + 1, GROUND - 4, 1, 4, "#4a3520");
+  px(ctx, x, top - 1, 1, 1, def.snowy ? "#f4f8ff" : leaf.light);
+
+  const tiers = Math.floor((height - 3) / 3);
+  for (let t = 0; t < tiers; t++) {
+    for (let row = 0; row < 3; row++) {
+      const half = 1 + t + row;
+      const y = top + t * 3 + row;
+      for (let dx = -half; dx <= half + 1; dx++) {
+        const edge = dx === -half || dx === half + 1;
+        let c = row === 0 ? leaf.light : row === 1 ? leaf.mid : leaf.dark;
+        if (r() < 0.16) c = leaf.shade;
+        // La neige tient sur le dessus de chaque étage.
+        if (def.snowy && row === 0 && r() < 0.85) c = r() < 0.25 ? "#dfe9f5" : "#f4f8ff";
+        else if (def.snowy && edge && row === 2 && r() < 0.5) c = "#eef4fb";
+        px(ctx, x + dx, y, 1, 1, c);
+        leaves.push({ x: x + dx, y });
+      }
+    }
+  }
+}
+
+function drawCactus(ctx: Ctx, r: () => number, x: number, height: number) {
+  const body = "#4f9a3a";
+  const light = "#66b34c";
+  const dark = "#3c7f2d";
+  const column = (cx: number, y0: number, y1: number) => {
+    for (let y = y0; y < y1; y++) {
+      px(ctx, cx, y, 1, 1, light);
+      px(ctx, cx + 1, y, 1, 1, y % 3 === 0 ? dark : body);
+      px(ctx, cx + 2, y, 1, 1, dark);
+    }
+  };
+  const top = GROUND - height;
+  column(x - 1, top, GROUND);
+  // Deux bras, à des hauteurs différentes.
+  const leftY = GROUND - Math.round(height * 0.5);
+  px(ctx, x - 4, leftY, 3, 2, body);
+  column(x - 5, leftY - 4, leftY + 1);
+  if (height > 9) {
+    const rightY = GROUND - Math.round(height * 0.7);
+    px(ctx, x + 2, rightY, 3, 2, body);
+    column(x + 4, rightY - 3, rightY + 1);
+  }
+  // Une fleur au sommet de certains cactus.
+  if (r() < 0.6) px(ctx, x, top - 1, 1, 1, "#f06aa8");
+}
+
+/// Champignon géant : pied clair et chapeau bombé, rouge tacheté ou brun.
+function drawGiantMushroom(ctx: Ctx, r: () => number, x: number, height: number, red: boolean) {
+  const top = GROUND - height;
+  for (let y = top + 4; y < GROUND; y++) {
+    px(ctx, x - 1, y, 1, 1, "#f1ebdd");
+    px(ctx, x, y, 1, 1, "#e6dfcd");
+    px(ctx, x + 1, y, 1, 1, "#cfc6b3");
+  }
+  const halves = red ? [3, 5, 6, 7, 7] : [6, 8, 8];
+  const [main, dark, lit] = red ? ["#c9352b", "#a3271f", "#de4a3e"] : ["#9a7250", "#7d5a3d", "#ad8460"];
+  halves.forEach((half, row) => {
+    const y = top + row + (red ? 0 : 2);
+    for (let dx = -half; dx <= half; dx++) {
+      let c = row === halves.length - 1 ? dark : row === 0 ? lit : main;
+      if (red && row > 0 && row < halves.length - 1 && r() < 0.14) c = "#f4eee2";
+      px(ctx, x + dx, y, 1, 1, c);
+    }
+  });
+  // Lamelles claires sous le chapeau.
+  const under = top + halves.length + (red ? 0 : 2);
+  px(ctx, x - 3, under, 7, 1, "#d9cdb8");
+}
+
+function drawBiomeTree(ctx: Ctx, r: () => number, x: number, height: number, index: number, leaves: Point[], def: BiomeDef) {
+  if (def.tree === "spruce") drawSpruce(ctx, r, x, height, leaves, def);
+  else if (def.tree === "cactus") drawCactus(ctx, r, x, height);
+  else if (def.tree === "mushroom") drawGiantMushroom(ctx, r, x, height, index % 2 === 0);
+  else drawTree(ctx, r, x, height, leaves, def);
+}
+
+function drawHouse(ctx: Ctx, r: () => number, def: BiomeDef) {
   const { x0, x1, top } = HOUSE;
+  const house = def.house;
 
   // Cheminée (dessinée avant le toit qui recouvre sa base).
   for (let y = top - 24; y < top - 6; y++) {
     for (let x = x1 - 14; x < x1 - 9; x++) px(ctx, x, y, 1, 1, pick(r, ["#7d7d7d", "#6a6a6a", "#8f8f8f"]));
   }
-  px(ctx, x1 - 15, top - 25, 7, 1, "#5b5b5b");
+  px(ctx, x1 - 15, top - 25, 7, 1, def.snowy ? "#f4f8ff" : "#5b5b5b");
 
   // Murs en planches.
   for (let y = top; y < GROUND; y++) {
     for (let x = x0; x < x1; x++) {
-      let c = "#b48a52";
+      let c = house.wall;
       const row = Math.floor((y - top) / 4);
-      if ((y - top) % 4 === 3) c = "#8d6a3a";
-      else if ((x - x0 + (row % 2) * 4) % 8 === 0) c = "#9c7744";
-      else if (r() < 0.12) c = "#a67f4a";
+      if ((y - top) % 4 === 3) c = house.wallSeam;
+      else if ((x - x0 + (row % 2) * 4) % 8 === 0) c = house.wallJoint;
+      else if (r() < 0.12) c = house.wallNoise;
       px(ctx, x, y, 1, 1, c);
     }
   }
@@ -361,9 +668,11 @@ function drawHouse(ctx: Ctx, r: () => number) {
     for (let k = 0; k < 2; k++) {
       for (let x = left; x < right; x++) {
         const edge = x === left || x === right - 1;
-        let c = (x + y) % 5 === 0 ? "#4a3220" : "#5b3c22";
-        if (k === 1) c = "#6f4a2a";
-        if (edge) c = "#3b2716";
+        let c = (x + y) % 5 === 0 ? house.roofAlt : house.roof;
+        if (k === 1) c = house.roofLight;
+        if (edge) c = house.roofEdge;
+        // Neige posée sur chaque marche du toit.
+        if (def.snowy && k === 1) c = (x + y) % 7 === 0 ? "#dfe9f5" : "#f4f8ff";
         px(ctx, x, y - k, 1, 1, c);
       }
     }
@@ -391,7 +700,7 @@ function drawHouse(ctx: Ctx, r: () => number) {
     px(ctx, w.x + 1, w.y + 1, 2, 2, "#d8f0ff");
     px(ctx, w.x + 4, w.y, 1, 8, "#5c4426");
     px(ctx, w.x, w.y + 4, 8, 1, "#5c4426");
-    px(ctx, w.x - 2, w.y + 9, 12, 1, "#4e3a20");
+    px(ctx, w.x - 2, w.y + 9, 12, 1, def.snowy ? "#f4f8ff" : "#4e3a20");
     px(ctx, w.x + 1, w.y + 7, 6, 2, "#a0522d");
     px(ctx, w.x + 1, w.y + 6, 1, 1, "#e33b3b");
     px(ctx, w.x + 3, w.y + 5, 1, 2, "#4f9636");
@@ -403,11 +712,12 @@ function drawHouse(ctx: Ctx, r: () => number) {
   px(ctx, TORCH.x, TORCH.y + 2, 1, 4, "#6e5230");
 }
 
-function drawFence(ctx: Ctx) {
+function drawFence(ctx: Ctx, def: BiomeDef) {
   for (let x = FENCE.x0; x <= FENCE.x1; x += 6) {
     const top = x === FENCE.x1 ? LANTERN.y + 4 : GROUND - 8;
     px(ctx, x, top, 2, GROUND - top, "#9c7744");
     px(ctx, x + 1, top, 1, GROUND - top, "#7d5d34");
+    if (def.snowy && x !== FENCE.x1) px(ctx, x, top - 1, 2, 1, "#f4f8ff");
   }
   for (const ry of [GROUND - 6, GROUND - 3]) px(ctx, FENCE.x0 + 2, ry, FENCE.x1 - FENCE.x0 - 2, 1, "#b48a52");
   // Cadre de la lanterne (la flamme est dessinée avec les éléments lumineux).
@@ -422,32 +732,37 @@ function pondDepth(x: number) {
   return Math.round(Math.sin((Math.PI * (x - POND.x0)) / (POND.x1 - POND.x0)) * 9);
 }
 
-function drawGround(ctx: Ctx, r: () => number) {
+function drawGround(ctx: Ctx, r: () => number, def: BiomeDef) {
+  const { turf, water } = def;
   for (let x = 0; x < W; x++) {
     const depth = pondDepth(x);
     let y = GROUND;
     if (depth > 0) {
       for (; y <= GROUND + depth; y++) {
         const t = (y - GROUND) / 9;
-        px(ctx, x, y, 1, 1, y === GROUND ? "#5b93f2" : mixHex("#3f76e4", "#26479c", t));
+        // Glace : surface claire, rayée de quelques fissures.
+        const crack = def.frozen && y === GROUND && (x * 7) % 11 === 0;
+        px(ctx, x, y, 1, 1, crack ? water.top : y === GROUND ? water.surface : mixHex(water.top, water.deep, t));
       }
     } else {
-      px(ctx, x, y++, 1, 1, r() < 0.5 ? "#72b842" : "#64a838");
-      px(ctx, x, y++, 1, 1, r() < 0.5 ? "#5a9a30" : "#4f8a2c");
-      // Bord du bloc d'herbe qui « coule » sur la terre.
-      if (r() < 0.55) px(ctx, x, y++, 1, 1, "#4f8a2c");
-      if (r() < 0.2) px(ctx, x, y++, 1, 1, "#4a7f2a");
+      px(ctx, x, y++, 1, 1, r() < 0.5 ? turf.top[0] : turf.top[1]);
+      px(ctx, x, y++, 1, 1, r() < 0.5 ? turf.under[0] : turf.under[1]);
+      // Bord du bloc de surface qui « coule » sur ce qu'il y a dessous.
+      if (r() < 0.55) px(ctx, x, y++, 1, 1, turf.drip[0]);
+      if (r() < 0.2) px(ctx, x, y++, 1, 1, turf.drip[1]);
     }
     for (; y < H; y++) {
-      const c = r() < 0.025 ? "#8a8a8a" : pick(r, ["#866043", "#79573b", "#6b4a32", "#866043", "#8d6748"]);
+      const c = r() < 0.025 ? "#8a8a8a" : pick(r, def.soil);
       px(ctx, x, y, 1, 1, c);
     }
   }
 
-  // Nénuphars.
-  px(ctx, 80, GROUND, 3, 1, "#3e8f2e");
-  px(ctx, 97, GROUND, 3, 1, "#3e8f2e");
-  px(ctx, 98, GROUND - 1, 1, 1, "#f4a6c8");
+  if (def.lilies) {
+    // Nénuphars.
+    px(ctx, 80, GROUND, 3, 1, "#3e8f2e");
+    px(ctx, 97, GROUND, 3, 1, "#3e8f2e");
+    px(ctx, 98, GROUND - 1, 1, 1, "#f4a6c8");
+  }
 
   // Ombre du chien.
   px(ctx, DOG_X + 5, GROUND, 13, 1, "rgba(0,0,0,0.22)");
@@ -463,38 +778,34 @@ function drawGround(ctx: Ctx, r: () => number) {
   px(ctx, FIRE_X - 5, GROUND - 1, 11, 1, "#3a3a3a");
 }
 
-function buildForeground(): Foreground {
+function buildForeground(def: BiomeDef): Foreground {
   const canvas = makeCanvas();
   const ctx = ctxOf(canvas);
   const r = rng(1337);
   const leaves: Point[] = [];
 
-  const trees: [number, number][] = [
-    [28, 15],
-    [52, 11],
-    [292, 17],
-    [312, 12],
-  ];
-  for (const [x, h] of trees) drawTree(ctx, r, x, h, leaves);
-  drawHouse(ctx, r);
-  drawFence(ctx);
-  drawGround(ctx, r);
+  const trees = def.trees;
+  trees.forEach(([x, h], index) => drawBiomeTree(ctx, r, x, h, index, leaves, def));
+  drawHouse(ctx, r, def);
+  drawFence(ctx, def);
+  drawGround(ctx, r, def);
 
   // Herbes hautes et fleurs : dessinées à chaque image pour onduler au vent.
   const blades: Blade[] = [];
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < def.blades.count; i++) {
     const x = Math.floor(r() * W);
     if ((x > 66 && x < 116) || (x > 118 && x < 166) || (x > 178 && x < 238)) continue;
-    const flower = r() < 0.3 ? pick(r, ["#e33b3b", "#f5d142", "#9b6bff", "#ffffff", "#e84f9b"]) : null;
+    const flower = r() < def.blades.flowerChance ? pick(r, def.blades.flowers) : null;
     blades.push({
       x,
       h: flower ? 3 : 1 + Math.floor(r() * 3),
-      color: r() < 0.5 ? "#5aa83d" : "#4f9636",
+      color: r() < 0.5 ? def.blades.colors[0] : def.blades.colors[1],
       flower,
     });
   }
 
   return {
+    def,
     canvas,
     leaves,
     canopies: trees.map(([x, h]) => ({ x, y: GROUND - h - 4 })),
@@ -678,10 +989,11 @@ function updateParticles(state: SceneState, t: number, dt: number, fg: Foregroun
     state.embers.push({ x: FIRE_X - 2 + Math.random() * 5, y: GROUND - 10, vx: 0, vy: -16 - Math.random() * 8, life: 1.3, max: 1.3, seed: Math.random() * 10 });
     state.lastEmber = t;
   }
-  if (t > state.nextLeaf) {
+  const falling = fg.def.falling;
+  if (falling && t > state.nextLeaf) {
     const c = fg.canopies[Math.floor(Math.random() * fg.canopies.length)];
     state.falling.push({ x: c.x + (Math.random() - 0.5) * 14, y: c.y, vx: 3, vy: 6, life: 9, max: 9, seed: Math.random() * 10 });
-    state.nextLeaf = t + 1.8 + Math.random() * 3;
+    state.nextLeaf = t + falling.every[0] + Math.random() * (falling.every[1] - falling.every[0]);
   }
   if (env.night > 0.8 && env.wet < 0.1 && !state.star && t > state.nextStar) {
     const dir = Math.random() < 0.5 ? -1 : 1;
@@ -734,20 +1046,27 @@ function drawLitDynamic(ctx: Ctx, t: number, state: SceneState, fg: Foreground, 
   const gust = Math.max(0, Math.sin(t * 0.55)) * 0.07 + 0.015;
   const tick = Math.floor(t * 3);
   for (let i = 0; i < fg.leaves.length; i++) {
-    if (hash(i, tick) < gust) px(ctx, fg.leaves[i].x, fg.leaves[i].y, 1, 1, "#86d35a");
+    if (hash(i, tick) < gust) px(ctx, fg.leaves[i].x, fg.leaves[i].y, 1, 1, fg.def.leaf.flash);
   }
+  const fallColors = fg.def.falling?.colors ?? PLAINS.falling!.colors;
   for (const p of state.falling) {
     const a = Math.min(1, p.life / 2);
-    px(ctx, Math.round(p.x), Math.round(p.y), 1, 1, `rgba(${p.seed > 5 ? "122,190,72" : "196,160,62"},${a.toFixed(2)})`);
+    px(ctx, Math.round(p.x), Math.round(p.y), 1, 1, `rgba(${p.seed > 5 ? fallColors[0] : fallColors[1]},${a.toFixed(2)})`);
   }
 
   // Reflets de l'étang (de jour ; la nuit ils sont dessinés comme éléments lumineux).
   if (env.night < 0.5) {
+    const water = fg.def.water;
     for (let x = POND.x0 + 2; x < POND.x1 - 1; x++) {
-      if (Math.sin(x * 0.7 - t * 2.4) > 0.86) px(ctx, x, GROUND, 1, 1, "#b8d4ff");
-      if (Math.sin(x * 0.45 + t * 1.3) > 0.93 && pondDepth(x) > 3) px(ctx, x, GROUND + 2, 1, 1, "#7aa6f5");
+      // Sur la glace, les reflets ne bougent pas : quelques éclats fixes qui scintillent.
+      if (fg.def.frozen) {
+        if (hash(x, 3) > 0.9 && Math.sin(t * 1.5 + x) > 0.2) px(ctx, x, GROUND, 1, 1, water.glint);
+        continue;
+      }
+      if (Math.sin(x * 0.7 - t * 2.4) > 0.86) px(ctx, x, GROUND, 1, 1, water.glint);
+      if (Math.sin(x * 0.45 + t * 1.3) > 0.93 && pondDepth(x) > 3) px(ctx, x, GROUND + 2, 1, 1, water.glintDeep);
     }
-    for (const b of env.night < 0.3 && env.wet < 0.2 ? BUTTERFLIES : []) {
+    for (const b of fg.def.butterflies && env.night < 0.3 && env.wet < 0.2 ? BUTTERFLIES : []) {
       const x = Math.round(b.cx + Math.sin(t * 0.6 + b.phase) * 14 + Math.sin(t * 1.7 + b.phase) * 4);
       const y = Math.round(GROUND - 9 + Math.sin(t * 1.1 + b.phase * 2) * 4);
       const open = Math.floor(t * 8 + b.phase) % 2 === 0;
@@ -805,12 +1124,12 @@ function lampLevel(env: Env) {
   return clamp01((env.night - 0.3) / 0.3);
 }
 
-function fireflyLevel(env: Env) {
-  return clamp01((env.night - 0.6) / 0.3) * (env.wet < 0.2 ? 1 : 0);
+function fireflyLevel(env: Env, def: BiomeDef) {
+  return clamp01((env.night - 0.6) / 0.3) * (env.wet < 0.2 ? 1 : 0) * def.fireflies;
 }
 
 /// Éléments qui émettent leur propre lumière (jamais assombris).
-function drawEmissive(ctx: Ctx, t: number, state: SceneState, env: Env) {
+function drawEmissive(ctx: Ctx, t: number, state: SceneState, env: Env, def: BiomeDef) {
   // Braises sur les bûches.
   for (let x = FIRE_X - 4; x <= FIRE_X + 4; x++) {
     const a = 0.45 + 0.45 * Math.sin(t * 3 + x * 1.7);
@@ -858,14 +1177,15 @@ function drawEmissive(ctx: Ctx, t: number, state: SceneState, env: Env) {
   ctx.globalAlpha = 1;
   if (env.night < 0.6) return;
 
-  // Reflets de lune sur l'étang.
+  // Reflets de lune sur l'étang (immobiles sur la glace).
   for (let x = POND.x0 + 2; x < POND.x1 - 1; x++) {
-    if (Math.sin(x * 0.7 - t * 2) > 0.88) px(ctx, x, GROUND, 1, 1, "rgba(190,210,255,0.55)");
+    const lit = def.frozen ? hash(x, 3) > 0.88 : Math.sin(x * 0.7 - t * 2) > 0.88;
+    if (lit) px(ctx, x, GROUND, 1, 1, "rgba(190,210,255,0.55)");
   }
 
   // Lucioles et leur reflet dans l'eau (elles se cachent quand il pleut).
   for (const f of FIREFLIES) {
-    const a = Math.max(0, Math.sin(t * 1.7 + f.phase)) * fireflyLevel(env);
+    const a = Math.max(0, Math.sin(t * 1.7 + f.phase)) * fireflyLevel(env, def);
     if (a < 0.05) continue;
     const x = Math.round(f.x + Math.sin(t * 0.5 + f.phase) * 7);
     const y = Math.round(f.y + Math.cos(t * 0.7 + f.phase) * 4);
@@ -921,7 +1241,7 @@ function drawDarkness(dark: Ctx, v: View, t: number, litMask: HTMLCanvasElement,
   dark.globalCompositeOperation = "source-over";
 }
 
-function drawLightGlows(ctx: Ctx, v: View, t: number, state: SceneState, env: Env) {
+function drawLightGlows(ctx: Ctx, v: View, t: number, state: SceneState, env: Env, def: BiomeDef) {
   const k = fireFlicker(t);
   const n = env.night;
   const lamps = lampLevel(env);
@@ -951,7 +1271,7 @@ function drawLightGlows(ctx: Ctx, v: View, t: number, state: SceneState, env: En
     for (const w of WINDOWS) glow(ctx, v, w.x + 4, w.y + 4, 22, [[0, `rgba(255,190,90,${(0.26 * lamps).toFixed(3)})`], [1, none]]);
   }
 
-  const flies = fireflyLevel(env);
+  const flies = fireflyLevel(env, def);
   if (flies > 0) {
     for (const f of FIREFLIES) {
       const a = Math.max(0, Math.sin(t * 1.7 + f.phase)) * flies;
@@ -1093,9 +1413,13 @@ interface Props {
   mode?: "theme" | "realtime";
   /// Pluie ou neige de temps en temps.
   weatherEnabled?: boolean;
+  /// Décor de la scène.
+  biome?: Biome;
   /// Forçages pour les aperçus et les tests.
   hourOverride?: number;
   weatherOverride?: Weather;
+  /// Scène cachée derrière un fond flou : rythme réduit.
+  calm?: boolean;
   className?: string;
 }
 
@@ -1108,16 +1432,22 @@ export function MinecraftScene({
   paused,
   mode = "theme",
   weatherEnabled = false,
+  biome = "plains",
   hourOverride,
   weatherOverride,
+  calm = false,
   className,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const calmRef = useRef(calm);
+  calmRef.current = calm;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = ctxOf(canvas);
+
+    const def = BIOME_DEFS[biome] ?? PLAINS;
 
     const computeEnv = (): Env => {
       const now = new Date();
@@ -1132,19 +1462,25 @@ export function MinecraftScene({
         : weatherEnabled
           ? weatherAt(now.getTime())
           : { weather: "clear" as Weather, wet: 0 };
+      // Chaque biome a sa météo : la pluie devient neige en montagne, et il ne pleut pas au désert.
+      if (sky.weather === "rain") {
+        if (def.rain === "clear") return { ...base, weather: "clear", wet: 0 };
+        return { ...base, weather: def.rain, wet: sky.wet };
+      }
+      if (sky.weather === "snow" && def.rain === "clear") return { ...base, weather: "clear", wet: 0 };
       return { ...base, ...sky };
     };
 
     let env = computeEnv();
     const sky = makeCanvas();
-    let back = buildBackLayer(env);
+    let back = buildBackLayer(env, def);
     const rebuildLayers = () => {
       drawSky(ctxOf(sky), env);
-      back = buildBackLayer(env);
+      back = buildBackLayer(env, def);
     };
     drawSky(ctxOf(sky), env);
     let lastEnvUpdate = performance.now();
-    const fg = buildForeground();
+    const fg = buildForeground(def);
 
     const main = makeCanvas();
     const mainCtx = ctxOf(main);
@@ -1194,7 +1530,7 @@ export function MinecraftScene({
       drawLitDynamic(litCtx, t, state, fg, env);
       mainCtx.drawImage(lit, 0, 0);
       emCtx.clearRect(0, 0, W, H);
-      drawEmissive(emCtx, t, state, env);
+      drawEmissive(emCtx, t, state, env, def);
 
       // 2. Agrandissement net + éclairage haute résolution.
       ctx.imageSmoothingEnabled = false;
@@ -1207,7 +1543,7 @@ export function MinecraftScene({
       const rays = (1 - env.night * 4) * (1 - env.wet * 2);
       if (env.sun && rays > 0.02) drawGodRays(ctx, view, t, env.sun, Math.min(1, rays));
       ctx.drawImage(emissive, view.ox, view.oy, W * view.s, H * view.s);
-      drawLightGlows(ctx, view, t, state, env);
+      drawLightGlows(ctx, view, t, state, env, def);
       if (state.star) drawShootingStar(ctx, view, t, state.star);
       drawFog(ctx, view, t, env);
       drawWeather(ctx, view, t, env);
@@ -1243,7 +1579,7 @@ export function MinecraftScene({
         state.nextStar = t0 + 2;
         for (let i = 50; i > 0; i--) updateParticles(state, t0 - i * 0.1, 0.1, fg, env);
       }
-      if (now - last < FRAME_MS) return;
+      if (document.hidden || now - last < (calmRef.current ? CALM_FRAME_MS : FRAME_MS)) return;
       const dt = last ? Math.min(0.2, (now - last) / 1000) : FRAME_MS / 1000;
       last = now;
 
@@ -1264,7 +1600,7 @@ export function MinecraftScene({
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [theme, animated, paused, mode, weatherEnabled, hourOverride, weatherOverride]);
+  }, [theme, animated, paused, mode, weatherEnabled, biome, hourOverride, weatherOverride]);
 
   return <canvas ref={canvasRef} className={className} aria-hidden />;
 }

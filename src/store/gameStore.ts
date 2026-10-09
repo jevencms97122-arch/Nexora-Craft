@@ -3,7 +3,12 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import { analyzeLogs, type CrashReport } from "../lib/crash";
 import type { DownloadProgress, GameExited, GameLogLine, ImportProgress } from "../lib/types";
+import { isSignedIn } from "./cloudStore";
 import { useInstanceStore } from "./instanceStore";
+import { toast } from "./toastStore";
+
+/// Message affiché quand on tente de jouer sans compte Nexora connecté.
+export const ACCOUNT_REQUIRED = "Connecte-toi à ton compte Nexora (onglet Compte) pour lancer le jeu.";
 
 interface GameState {
   launchingId: string | null;
@@ -75,6 +80,11 @@ export const useGameStore = create<GameState>((set, get) => {
     officialProgress: null,
 
     joinOfficial: async (address) => {
+      if (!(await isSignedIn())) {
+        set({ error: ACCOUNT_REQUIRED });
+        toast.error(ACCOUNT_REQUIRED);
+        return;
+      }
       set({ preparingOfficial: true, officialProgress: null, error: null });
       try {
         const instance = await api.ensureOfficialInstance();
@@ -87,6 +97,12 @@ export const useGameStore = create<GameState>((set, get) => {
     },
 
     launch: async (instanceId, server) => {
+      // Sans compte Nexora connecté, aucune instance ne se lance.
+      if (!(await isSignedIn())) {
+        set({ error: ACCOUNT_REQUIRED });
+        toast.error(ACCOUNT_REQUIRED);
+        return;
+      }
       set({ launchingId: instanceId, lastInstanceId: instanceId, currentServer: server ?? null, error: null, logs: [], crash: null });
       try {
         await api.launchInstance(instanceId, server);

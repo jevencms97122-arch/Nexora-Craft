@@ -136,6 +136,86 @@ pub async fn get_versions_filtered(
     Ok(res.json::<Vec<ProjectVersion>>().await?)
 }
 
+/// Image de la galerie d'un projet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GalleryImage {
+    /// Miniature.
+    pub url: String,
+    /// Image en taille réelle, quand elle existe.
+    #[serde(default)]
+    pub raw_url: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub featured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectLicense {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+/// Fiche complète d'un projet, pour sa page de présentation dans le launcher.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectDetails {
+    pub id: String,
+    pub slug: String,
+    pub title: String,
+    /// Résumé en une phrase.
+    #[serde(default)]
+    pub description: String,
+    /// Présentation complète, en Markdown.
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    pub project_type: String,
+    #[serde(default)]
+    pub downloads: u64,
+    #[serde(default)]
+    pub followers: u64,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub loaders: Vec<String>,
+    #[serde(default)]
+    pub game_versions: Vec<String>,
+    /// « required », « optional » ou « unsupported ».
+    #[serde(default)]
+    pub client_side: Option<String>,
+    #[serde(default)]
+    pub server_side: Option<String>,
+    #[serde(default)]
+    pub license: Option<ProjectLicense>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub issues_url: Option<String>,
+    #[serde(default)]
+    pub wiki_url: Option<String>,
+    #[serde(default)]
+    pub discord_url: Option<String>,
+    #[serde(default)]
+    pub gallery: Vec<GalleryImage>,
+    #[serde(default)]
+    pub updated: Option<String>,
+    #[serde(default)]
+    pub published: Option<String>,
+}
+
+pub async fn get_project_details(client: &reqwest::Client, project_id: &str) -> AppResult<ProjectDetails> {
+    let res = client.get(format!("{API_BASE}/project/{project_id}")).send().await?;
+    if !res.status().is_success() {
+        return Err(crate::error::AppError::Other("ce projet est introuvable sur Modrinth".into()));
+    }
+    Ok(res.json::<ProjectDetails>().await?)
+}
+
 pub async fn get_project(client: &reqwest::Client, project_id: &str) -> AppResult<ProjectInfo> {
     let res = client.get(format!("{API_BASE}/project/{project_id}")).send().await?;
     Ok(res.json::<ProjectInfo>().await?)

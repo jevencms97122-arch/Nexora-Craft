@@ -162,7 +162,14 @@ pub fn get_settings() -> AppResult<Settings> {
 
 #[tauri::command]
 pub fn save_settings(settings: Settings) -> AppResult<()> {
-    settings::save(&settings)
+    let old = settings::load().unwrap_or_default();
+    settings::save(&settings)?;
+    // La mémoire par défaut s'applique aussi aux instances qui n'ont pas été réglées à la main.
+    instances::follow_default_memory(
+        (old.default_min_ram_mb, old.default_max_ram_mb),
+        (settings.default_min_ram_mb, settings.default_max_ram_mb),
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -288,6 +295,19 @@ pub async fn launch_instance(
 }
 
 // ---------- Contenu Modrinth ----------
+
+/// Fiche complète d'un projet Modrinth (présentation, galerie, liens).
+#[tauri::command]
+pub async fn get_modrinth_project(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> AppResult<crate::modrinth::ProjectDetails> {
+    // L'identifiant vient de l'interface : seuls les caractères d'un identifiant Modrinth passent.
+    if project_id.is_empty() || !project_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(AppError::Other("identifiant de projet invalide".into()));
+    }
+    crate::modrinth::get_project_details(&state.http, &project_id).await
+}
 
 #[tauri::command]
 pub async fn search_modrinth(
@@ -528,6 +548,29 @@ pub async fn import_instance_code(
 // ---------- Garde-robe ----------
 
 // ---------- Import de fichiers téléchargés (CurseForge) ----------
+
+/// Vrai si une autre application (musique, vidéo YouTube...) joue du son sur le PC.
+#[tauri::command]
+pub async fn other_media_playing() -> bool {
+    tokio::task::spawn_blocking(crate::media::other_media_playing).await.unwrap_or(false)
+}
+
+// ---------- Session du compte Nexora ----------
+
+#[tauri::command]
+pub fn session_get(key: String) -> Option<String> {
+    crate::session::get(&key)
+}
+
+#[tauri::command]
+pub fn session_set(key: String, value: String) -> AppResult<()> {
+    crate::session::set(&key, &value)
+}
+
+#[tauri::command]
+pub fn session_remove(key: String) -> AppResult<()> {
+    crate::session::remove(&key)
+}
 
 const CURSEFORGE_WINDOW: &str = "curseforge";
 const CURSEFORGE_URL: &str = "https://www.curseforge.com/minecraft";

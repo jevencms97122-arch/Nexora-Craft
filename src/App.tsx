@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { CommandPalette } from "./components/CommandPalette";
 import { CrashModal } from "./components/CrashModal";
@@ -10,13 +10,15 @@ import { Toasts } from "./components/Toasts";
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { TitleBar } from "./components/TitleBar";
 import { PlayPage } from "./routes/PlayPage";
-import { InstancesPage } from "./routes/InstancesPage";
-import { AccountPage } from "./routes/AccountPage";
-import { SettingsPage } from "./routes/SettingsPage";
-import { ContentPage } from "./routes/ContentPage";
-import { InstanceDetailPage } from "./routes/InstanceDetailPage";
-import { GalleryPage } from "./routes/GalleryPage";
-import { MultiPage } from "./routes/MultiPage";
+
+// Les autres pages ne sont chargées qu'à la première visite : démarrage plus rapide, moins de mémoire.
+const InstancesPage = lazy(() => import("./routes/InstancesPage").then((m) => ({ default: m.InstancesPage })));
+const AccountPage = lazy(() => import("./routes/AccountPage").then((m) => ({ default: m.AccountPage })));
+const SettingsPage = lazy(() => import("./routes/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const ContentPage = lazy(() => import("./routes/ContentPage").then((m) => ({ default: m.ContentPage })));
+const InstanceDetailPage = lazy(() => import("./routes/InstanceDetailPage").then((m) => ({ default: m.InstanceDetailPage })));
+const GalleryPage = lazy(() => import("./routes/GalleryPage").then((m) => ({ default: m.GalleryPage })));
+const MultiPage = lazy(() => import("./routes/MultiPage").then((m) => ({ default: m.MultiPage })));
 import { useAccountStore } from "./store/accountStore";
 import { useBackgroundStore } from "./store/backgroundStore";
 import { useCloudStore } from "./store/cloudStore";
@@ -28,7 +30,7 @@ import { useThemeStore } from "./store/themeStore";
 function AppShell() {
   const location = useLocation();
   const { image, refresh } = useBackgroundStore();
-  const { theme, animated, sceneMode, weather } = useThemeStore();
+  const { theme, animated, sceneMode, weather, biome } = useThemeStore();
   const runningId = useGameStore((s) => s.runningId);
 
   useEffect(() => {
@@ -117,6 +119,8 @@ function AppShell() {
             paused={!!runningId}
             mode={sceneMode}
             weatherEnabled={weather}
+            biome={biome}
+            calm={!isPlay}
             className="absolute inset-0 w-full h-full"
           />
         )}
@@ -152,6 +156,7 @@ function AppShell() {
           key={displayed.pathname}
           className={`flex-1 overflow-y-auto overflow-x-hidden min-h-0 ${leaving ? "page-out" : "page-in"}`}
         >
+          <Suspense fallback={null}>
           <Routes location={displayed}>
             <Route path="/" element={<PlayPage />} />
             <Route path="/instances" element={<InstancesPage />} />
@@ -162,6 +167,7 @@ function AppShell() {
             <Route path="/account" element={<AccountPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
       <CrashModal />

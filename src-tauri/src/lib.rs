@@ -9,6 +9,7 @@ mod error;
 mod favorites;
 mod imports;
 mod instances;
+mod media;
 mod java;
 mod minecraft;
 mod modrinth;
@@ -16,6 +17,7 @@ mod music;
 mod paths;
 mod screenshots;
 mod servers;
+mod session;
 mod settings;
 mod share;
 mod skins;
@@ -64,6 +66,7 @@ pub fn run() {
             commands::clear_background_image,
             commands::launch_instance,
             commands::search_modrinth,
+            commands::get_modrinth_project,
             commands::list_installed_content,
             commands::install_content,
             commands::remove_content,
@@ -95,6 +98,10 @@ pub fn run() {
             commands::import_instance_code,
             commands::list_wardrobe,
             commands::list_game_music,
+            commands::other_media_playing,
+            commands::session_get,
+            commands::session_set,
+            commands::session_remove,
             commands::open_curseforge,
             commands::scan_downloads,
             commands::inspect_download,

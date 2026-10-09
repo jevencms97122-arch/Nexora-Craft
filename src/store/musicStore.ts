@@ -13,6 +13,10 @@ import { api } from "../lib/api";
  *
  * La musique ne joue que lorsque la fenêtre du launcher est au premier plan, même si une partie
  * est en cours.
+ *
+ * Elle laisse aussi la place aux autres sons du PC : si une autre application joue déjà (musique,
+ * vidéo YouTube, appel...), elle ne démarre pas, ou se met en pause, et reprend quand le silence
+ * revient. Le son du launcher et du jeu ne compte pas.
  */
 
 export interface Track {
@@ -74,6 +78,8 @@ interface MusicState extends MusicSettings {
   skip: () => void;
   /// La musique n'est autorisée que lorsque la fenêtre du launcher est au premier plan.
   setAllowed: (allowed: boolean) => void;
+  /// Une autre application joue du son : la musique d'ambiance reste en retrait.
+  otherMedia: boolean;
 }
 
 const KEY = "nexora.music";
@@ -100,6 +106,19 @@ const audio = new Audio();
 audio.preload = "auto";
 
 let allowed = false;
+/// Une autre application joue du son : on s'efface pour ne pas la couvrir.
+let yielding = false;
+/// Relevés consécutifs avec / sans autre son : un bruit passager ne doit pas couper la musique.
+let noise = 0;
+let quiet = 0;
+let polling = false;
+
+/// Intervalle entre deux relevés du son des autres applications.
+const MEDIA_POLL_MS = 2_000;
+/// Relevés de suite avec du son avant de se mettre en pause quand la musique joue.
+const PAUSE_AFTER_NOISE = 2;
+/// Relevés de suite sans son avant de reprendre.
+const RESUME_AFTER_QUIET = 3;
 /// Vrai dès qu'un premier morceau a été lancé depuis l'ouverture du launcher.
 let startedOnce = false;
 /// Vrai quand un morceau doit démarrer dès que la musique sera de nouveau autorisée.
@@ -156,6 +175,68 @@ export const useMusicStore = create<MusicState>((set, get) => {
     }
   }
 
+  /// La musique peut sonner : fenêtre au premier plan et aucune autre application ne joue.
+  function playable() {
+    return allowed && !yielding;
+  }
+
+  function setOther(value: boolean) {
+    yielding = value;
+    set({ otherMedia: value });
+  }
+
+  /// Relève tout de suite le son des autres applications, avant de lancer quoi que ce soit.
+  async function refreshYield() {
+    const other = await api.otherMediaPlaying().catch(() => false);
+    noise = other ? 1 : 0;
+    quiet = other ? 0 : 1;
+    setOther(other);
+  }
+
+  /// Fait coller la lecture à l'état : coupe si la musique n'est plus permise, sinon reprend ou
+  /// lance le morceau en attente.
+  function applyPlayable() {
+    if (!playable()) {
+      fadeOutAndPause();
+      return;
+    }
+    if (!get().enabled) return;
+    if (get().current) resume();
+    else if (pending) start();
+  }
+
+  async function pollMedia() {
+    if (polling || !allowed || !get().enabled) return;
+    polling = true;
+    try {
+      const other = await api.otherMediaPlaying().catch(() => false);
+      // La fenêtre a pu perdre le premier plan pendant le relevé.
+      if (!allowed || !get().enabled) return;
+      if (other) {
+        noise++;
+        quiet = 0;
+      } else {
+        quiet++;
+        noise = 0;
+      }
+      if (!yielding) {
+        // Rien ne joue encore chez nous : un seul relevé suffit pour ne pas démarrer par-dessus.
+        const needed = audio.paused ? 1 : PAUSE_AFTER_NOISE;
+        if (noise >= needed) {
+          setOther(true);
+          applyPlayable();
+        }
+      } else if (quiet >= RESUME_AFTER_QUIET) {
+        setOther(false);
+        applyPlayable();
+      }
+    } finally {
+      polling = false;
+    }
+  }
+
+  setInterval(pollMedia, MEDIA_POLL_MS);
+
   function pick(): Track | null {
     const TRACKS = get().tracks;
     if (TRACKS.length === 0) return null;
@@ -186,7 +267,7 @@ export const useMusicStore = create<MusicState>((set, get) => {
           window.removeEventListener("pointerdown", retry);
           window.removeEventListener("keydown", retry);
           waitingGesture = false;
-          if (allowed && get().enabled && get().current) resume();
+          if (playable() && get().enabled && get().current) resume();
         };
         window.addEventListener("pointerdown", retry);
         window.addEventListener("keydown", retry);
@@ -197,7 +278,7 @@ export const useMusicStore = create<MusicState>((set, get) => {
   function start() {
     clearTimer();
     if (!get().enabled) return;
-    if (!allowed) {
+    if (!playable()) {
       pending = true;
       return;
     }
@@ -215,7 +296,7 @@ export const useMusicStore = create<MusicState>((set, get) => {
       audio.src = track.url;
       audio.currentTime = 0;
       set({ current: track });
-      if (allowed && get().enabled) resume();
+      if (playable() && get().enabled) resume();
     });
   }
 
@@ -263,6 +344,7 @@ export const useMusicStore = create<MusicState>((set, get) => {
     ...initial,
     current: null,
     playing: false,
+    otherMedia: false,
     tracks: BUNDLED,
 
     loadTracks: async () => {
@@ -278,7 +360,7 @@ export const useMusicStore = create<MusicState>((set, get) => {
     setEnabled: (enabled) => {
       set({ enabled });
       save();
-      if (enabled) start();
+      if (enabled) void refreshYield().then(start);
       else stop();
     },
 
@@ -314,7 +396,7 @@ export const useMusicStore = create<MusicState>((set, get) => {
       targetVolume = clamped / 100;
       // Pendant un fondu de sortie, on ne remonte pas le son : le réglage servira à la reprise.
       if (!fade) audio.volume = targetVolume;
-      else if (!audio.paused && allowed) fadeTo(targetVolume);
+      else if (!audio.paused && playable()) fadeTo(targetVolume);
       set({ volume: clamped });
       save();
     },
@@ -331,8 +413,8 @@ export const useMusicStore = create<MusicState>((set, get) => {
         return;
       }
       if (!get().enabled) return;
-      if (get().current) resume();
-      else if (pending) start();
+      // De retour au premier plan : on regarde d'abord si un autre média joue, puis on décide.
+      void refreshYield().then(applyPlayable);
     },
   };
 });

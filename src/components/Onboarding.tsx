@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { isValidUsername } from "../lib/format";
 import type { ImportProgress, Instance, Server, ServerStatus } from "../lib/types";
 import { useAccountStore } from "../store/accountStore";
+import { useCloudStore } from "../store/cloudStore";
 import { useGameStore } from "../store/gameStore";
 import { useInstanceStore } from "../store/instanceStore";
 import { Wordmark } from "./Logo";
@@ -35,6 +36,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const { loginOffline, error: accountError } = useAccountStore();
   const refreshInstances = useInstanceStore((s) => s.refresh);
   const launch = useGameStore((s) => s.launch);
+  const signedIn = useCloudStore((s) => !!s.session);
   const [step, setStep] = useState(0);
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
@@ -93,6 +95,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }
 
   function join() {
+    // Le lancement demande un compte Nexora : sans lui, on termine le parcours sur l'onglet Compte.
+    if (!signedIn) {
+      finish();
+      window.location.hash = "#/account";
+      return;
+    }
     if (instance && server) launch(instance.id, server.address);
     finish();
   }
@@ -182,8 +190,9 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   <AnimatedText text={`Rejoins ${serverName}`} delay={0.1} />
                 </h2>
                 <p className="text-text-muted mt-3 leading-relaxed">
-                  Le jeu va se télécharger au premier lancement (quelques minutes selon ta connexion), puis tu
-                  arriveras directement sur le serveur.
+                  {signedIn
+                    ? "Le jeu va se télécharger au premier lancement (quelques minutes selon ta connexion), puis tu arriveras directement sur le serveur."
+                    : "Dernière chose : il faut un compte Nexora pour jouer. Il réserve ton pseudo et se crée en une minute avec ton e-mail."}
                 </p>
               </div>
               {server && (
@@ -240,8 +249,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             )}
             {step === 2 && (
               <button onClick={join} disabled={!instance || !server} className="btn btn-primary btn-shine h-11 px-6">
-                <Icon name="play" filled className="w-4 h-4" />
-                Rejoindre maintenant
+                <Icon name={signedIn ? "play" : "user"} filled={signedIn} className="w-4 h-4" />
+                {signedIn ? "Rejoindre maintenant" : "Créer mon compte Nexora"}
               </button>
             )}
           </div>

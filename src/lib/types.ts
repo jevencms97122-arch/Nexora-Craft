@@ -224,3 +224,39 @@ export interface ImportedFile {
   minecraft: string | null;
   compat: { instance_id: string; verdict: ImportVerdict; reason: string }[];
 }
+
+// ---------- Page d'un projet Modrinth ----------
+
+export interface ProjectGalleryImage {
+  url: string;
+  raw_url: string | null;
+  title: string | null;
+  description: string | null;
+  featured: boolean;
+}
+
+export interface ProjectDetails {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  /// Présentation complète, en Markdown.
+  body: string;
+  icon_url: string | null;
+  project_type: string;
+  downloads: number;
+  followers: number;
+  categories: string[];
+  loaders: string[];
+  game_versions: string[];
+  client_side: string | null;
+  server_side: string | null;
+  license: { id: string; name: string } | null;
+  source_url: string | null;
+  issues_url: string | null;
+  wiki_url: string | null;
+  discord_url: string | null;
+  gallery: ProjectGalleryImage[];
+  updated: string | null;
+  published: string | null;
+}

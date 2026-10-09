@@ -14,7 +14,7 @@ import {
   progressPercent,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { formatPlaytime } from "../lib/format";
+import { formatPlaytime, formatRam, normalizeRam } from "../lib/format";
 import type { ContentUpdate, InstalledContent, Instance } from "../lib/types";
 import { useGameStore } from "../store/gameStore";
 import { useInstanceStore } from "../store/instanceStore";
@@ -47,6 +47,9 @@ function NumberField({ label, value, onChange, suffix }: {
   );
 }
 
+/// Champs du formulaire que le joueur modifie lui-même.
+const EDITABLE = ["name", "min_ram_mb", "max_ram_mb", "width", "height", "jvm_args"] as const;
+
 export function InstanceDetailPage() {
   const { instanceId } = useParams<{ instanceId: string }>();
   const navigate = useNavigate();
@@ -68,10 +71,27 @@ export function InstanceDetailPage() {
     refresh();
   }, [refresh]);
 
+  // La liste des instances est relue souvent (fin de partie, installation d'un contenu...). Ce
+  // que le joueur est en train de modifier dans le formulaire ne doit pas être remplacé par les
+  // valeurs enregistrées : seuls les champs qu'il n'a pas touchés suivent la liste.
+  const [saved_, setSaved_] = useState<Instance | null>(null);
   useEffect(() => {
     const instance = instances.find((i) => i.id === instanceId);
-    if (instance) setForm(instance);
+    if (!instance) return;
+    setForm((prev) => {
+      if (!prev || prev.id !== instance.id || !saved_) return instance;
+      const next = { ...instance };
+      for (const field of EDITABLE) {
+        if (prev[field] !== saved_[field]) (next as Record<string, unknown>)[field] = prev[field];
+      }
+      return next;
+    });
+    setSaved_(instance);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instances, instanceId]);
+
+  /// Vrai si le formulaire contient des modifications pas encore enregistrées.
+  const dirty = !!form && !!saved_ && EDITABLE.some((field) => form[field] !== saved_[field]);
 
   async function loadContent() {
     if (!instanceId) return;
@@ -125,19 +145,34 @@ export function InstanceDetailPage() {
     }
   }
 
-  async function handleSave() {
-    if (!form) return;
+  /// Enregistre le formulaire. Retourne faux si l'enregistrement a échoué.
+  async function handleSave(): Promise<boolean> {
+    if (!form) return false;
     setSaving(true);
     try {
-      await update(form);
+      const max = normalizeRam(form.max_ram_mb);
+      const cleaned = { ...form, max_ram_mb: max, min_ram_mb: Math.min(normalizeRam(form.min_ram_mb), max) };
+      setForm(cleaned);
+      setSaved_(cleaned);
+      await update(cleaned);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      toast.success("Paramètres enregistrés");
+      toast.success(`Paramètres enregistrés (mémoire : ${formatRam(max)})`);
+      return true;
     } catch (e) {
       toast.error(String(e));
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  /// Lance le jeu ; des réglages modifiés mais pas encore enregistrés le sont d'abord, pour que
+  /// la partie démarre bien avec ce qui est affiché.
+  async function handlePlay() {
+    if (!form) return;
+    if (dirty && !(await handleSave())) return;
+    launch(form.id);
   }
 
   async function handleRemoveContent(projectId: string) {
@@ -225,7 +260,7 @@ export function InstanceDetailPage() {
           </div>
           <div className="flex flex-col items-end gap-2 w-56">
             <button
-              onClick={() => launch(form.id)}
+              onClick={handlePlay}
               disabled={isLaunching || isRunning}
               className="btn btn-primary h-12 px-8 rounded-2xl text-[15px] font-extrabold uppercase tracking-wider w-full"
             >
@@ -360,8 +395,20 @@ export function InstanceDetailPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <NumberField label="RAM min" suffix="Mo" value={form.min_ram_mb} onChange={(v) => setForm({ ...form, min_ram_mb: v })} />
-            <NumberField label="RAM max" suffix="Mo" value={form.max_ram_mb} onChange={(v) => setForm({ ...form, max_ram_mb: v })} />
+            <NumberField label={`RAM min (${formatRam(form.min_ram_mb)})`} suffix="Mo" value={form.min_ram_mb} onChange={(v) => setForm({ ...form, min_ram_mb: v })} />
+            <NumberField label={`RAM max (${formatRam(form.max_ram_mb)})`} suffix="Mo" value={form.max_ram_mb} onChange={(v) => setForm({ ...form, max_ram_mb: v })} />
+            <div className="col-span-2 flex items-center gap-1.5 flex-wrap -mt-1">
+              <span className="text-[11px] text-text-faint mr-1">Mémoire max :</span>
+              {[2, 4, 6, 8, 12].map((gb) => (
+                <button
+                  key={gb}
+                  onClick={() => setForm({ ...form, max_ram_mb: gb * 1024, min_ram_mb: Math.min(form.min_ram_mb, gb * 1024) })}
+                  className={`chip !h-7 ${form.max_ram_mb === gb * 1024 ? "chip-active" : ""}`}
+                >
+                  {gb} Go
+                </button>
+              ))}
+            </div>
             <NumberField label="Largeur" suffix="px" value={form.width} onChange={(v) => setForm({ ...form, width: v })} />
             <NumberField label="Hauteur" suffix="px" value={form.height} onChange={(v) => setForm({ ...form, height: v })} />
           </div>
@@ -378,7 +425,7 @@ export function InstanceDetailPage() {
 
           <button onClick={handleSave} disabled={saving} className="btn btn-primary">
             {saving ? <Spinner /> : saved ? <Icon name="check" className="w-4 h-4" /> : null}
-            {saving ? "Enregistrement" : saved ? "Enregistré" : "Enregistrer"}
+            {saving ? "Enregistrement" : saved ? "Enregistré" : dirty ? "Enregistrer les modifications" : "Enregistrer"}
           </button>
 
           <div className="border-t border-border pt-4 flex flex-col gap-2">

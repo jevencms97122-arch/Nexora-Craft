@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { InstallModpackModal } from "../components/InstallModpackModal";
 import { InstallToInstanceModal } from "../components/InstallToInstanceModal";
 import { CurseForgePanel } from "../components/CurseForgePanel";
+const ProjectModal = lazy(() => import("../components/ProjectModal").then((m) => ({ default: m.ProjectModal })));
 import { Icon, PageHeader, Skeleton, Spinner } from "../components/ui";
 import { useImportStore } from "../store/importStore";
 import { api } from "../lib/api";
@@ -39,6 +40,20 @@ function formatDownloads(n: number) {
   return String(n);
 }
 
+/// Un favori ne garde que l'essentiel du projet : de quoi rouvrir sa page ou l'installer.
+function favoriteHit(fav: Favorite): ModrinthHit {
+  return {
+    project_id: fav.project_id,
+    slug: fav.project_id,
+    title: fav.title,
+    description: "",
+    icon_url: fav.icon_url,
+    downloads: 0,
+    project_type: fav.content_type,
+    categories: [],
+  };
+}
+
 export function ContentPage() {
   const { instances, refresh } = useInstanceStore();
   /// Source du contenu : la recherche Modrinth intégrée, ou le site CurseForge dans le navigateur.
@@ -54,6 +69,8 @@ export function ContentPage() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModrinthHit | null>(null);
+  /// Projet dont la page de présentation est ouverte (clic sur une carte).
+  const [openedHit, setOpenedHit] = useState<ModrinthHit | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [favoriteCategory, setFavoriteCategory] = useState<ContentType | "all">("all");
 
@@ -193,7 +210,12 @@ export function ContentPage() {
                   </div>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2 stagger">
                     {items.map((fav) => (
-                      <div key={fav.project_id} className="row">
+                      <div
+                        key={fav.project_id}
+                        className="row"
+                        title="Voir la page du projet"
+                        onClick={() => setOpenedHit(favoriteHit(fav))}
+                      >
                         {fav.icon_url ? (
                           <img src={fav.icon_url} alt="" className="icon-tile" />
                         ) : (
@@ -201,25 +223,20 @@ export function ContentPage() {
                         )}
                         <div className="flex-1 font-medium truncate">{fav.title}</div>
                         <button
-                          onClick={() => api.removeFavorite(fav.project_id).then(setFavorites)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            api.removeFavorite(fav.project_id).then(setFavorites);
+                          }}
                           className="btn btn-ghost btn-sm w-8 p-0 !text-accent"
                           title="Retirer des favoris"
                         >
                           <Icon name="star" filled className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() =>
-                            setSelectedHit({
-                              project_id: fav.project_id,
-                              slug: fav.project_id,
-                              title: fav.title,
-                              description: "",
-                              icon_url: fav.icon_url,
-                              downloads: 0,
-                              project_type: fav.content_type,
-                              categories: [],
-                            })
-                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedHit(favoriteHit(fav));
+                          }}
                           className="btn btn-primary btn-sm"
                         >
                           <Icon name="download" className="w-3.5 h-3.5" /> Installer
@@ -256,7 +273,15 @@ export function ContentPage() {
             {results.map((hit) => {
               const fav = favoriteIds.has(hit.project_id);
               return (
-                <div key={hit.project_id} className="card card-hover p-4 flex gap-4">
+                <div
+                  key={hit.project_id}
+                  className="card card-hover p-4 flex gap-4 cursor-pointer"
+                  title="Voir la page du projet"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setOpenedHit(hit)}
+                  onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && setOpenedHit(hit)}
+                >
                   {hit.icon_url ? (
                     <img src={hit.icon_url} alt="" className="icon-tile w-16 h-16 rounded-2xl" />
                   ) : (
@@ -266,7 +291,10 @@ export function ContentPage() {
                     <div className="flex items-start gap-2">
                       <div className="font-semibold truncate flex-1">{hit.title}</div>
                       <button
-                        onClick={() => toggleFavorite(hit, tab)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(hit, tab);
+                        }}
                         className={`shrink-0 -mt-0.5 transition-colors ${fav ? "text-accent" : "text-text-faint hover:text-text"}`}
                         title={fav ? "Retirer des favoris" : "Ajouter aux favoris"}
                       >
@@ -284,7 +312,13 @@ export function ContentPage() {
                           {c}
                         </span>
                       ))}
-                      <button onClick={() => setSelectedHit(hit)} className="btn btn-primary btn-sm ml-auto">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedHit(hit);
+                        }}
+                        className="btn btn-primary btn-sm ml-auto"
+                      >
                         Installer
                       </button>
                     </div>
@@ -327,6 +361,22 @@ export function ContentPage() {
         </>
       )}
         </>
+      )}
+
+      {openedHit && (
+        <Suspense fallback={null}>
+        <ProjectModal
+          hit={openedHit}
+          favorite={favoriteIds.has(openedHit.project_id)}
+          onToggleFavorite={() => toggleFavorite(openedHit, openedHit.project_type as ContentType)}
+          onInstall={(hit) => {
+            // La fenêtre d'installation prend la place de la page du projet.
+            setOpenedHit(null);
+            setSelectedHit(hit);
+          }}
+          onClose={() => setOpenedHit(null)}
+        />
+        </Suspense>
       )}
 
       {selectedHit &&

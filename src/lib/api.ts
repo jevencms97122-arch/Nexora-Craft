@@ -6,6 +6,7 @@ import type {
   ContentType,
   ContentUpdate,
   DownloadedFile,
+  ProjectDetails,
   ImportedFile,
   ImportResult,
   InstallResult,
@@ -68,6 +69,9 @@ export const api = {
   /// `server` : adresse à rejoindre automatiquement au démarrage du jeu.
   launchInstance: (instanceId: string, server?: string | null) =>
     invoke<void>("launch_instance", { instanceId, server: server ?? null }),
+
+  /// Fiche complète d'un projet Modrinth, par identifiant ou par nom court.
+  getModrinthProject: (projectId: string) => invoke<ProjectDetails>("get_modrinth_project", { projectId }),
 
   searchModrinth: (params: {
     query: string;
@@ -165,6 +169,8 @@ export const api = {
   listWardrobe: () => invoke<WardrobeSkin[]>("list_wardrobe"),
   /// Ouvre CurseForge dans une fenêtre du launcher.
   openCurseForge: () => invoke<void>("open_curseforge"),
+  /// Une autre application (musique, vidéo YouTube...) joue du son sur le PC.
+  otherMediaPlaying: () => invoke<boolean>("other_media_playing"),
   /// Fichiers .jar/.zip apparus dans Téléchargements depuis `sinceMs`.
   scanDownloads: (sinceMs: number) => invoke<DownloadedFile[]>("scan_downloads", { sinceMs }),
   inspectDownload: (path: string) => invoke<ImportedFile>("inspect_download", { path }),

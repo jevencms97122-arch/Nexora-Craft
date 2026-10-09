@@ -82,17 +82,45 @@ pub fn get(id: &str) -> AppResult<Instance> {
         .ok_or_else(|| AppError::InstanceNotFound(id.to_string()))
 }
 
+/// Mémoire d'une nouvelle instance : celle choisie dans les réglages du launcher.
+fn default_memory() -> (u32, u32) {
+    let settings = crate::settings::load().unwrap_or_default();
+    let max = settings.default_max_ram_mb.max(512);
+    (settings.default_min_ram_mb.clamp(256, max), max)
+}
+
+/// Quand la mémoire par défaut change, les instances qui utilisaient encore l'ancienne valeur
+/// suivent la nouvelle. Celles réglées à la main ne sont pas touchées. Retourne le nombre
+/// d'instances mises à jour.
+pub fn follow_default_memory(old: (u32, u32), new: (u32, u32)) -> AppResult<usize> {
+    if old == new {
+        return Ok(0);
+    }
+    let mut instances = load_all()?;
+    let mut changed = 0;
+    for instance in instances.iter_mut().filter(|i| (i.min_ram_mb, i.max_ram_mb) == old) {
+        instance.min_ram_mb = new.0.min(new.1);
+        instance.max_ram_mb = new.1;
+        changed += 1;
+    }
+    if changed > 0 {
+        save_all(&instances)?;
+    }
+    Ok(changed)
+}
+
 pub fn create(new: NewInstance) -> AppResult<Instance> {
     let mut instances = load_all()?;
     let id = Uuid::new_v4().to_string();
+    let (min_ram_mb, max_ram_mb) = default_memory();
     let instance = Instance {
         id: id.clone(),
         name: new.name,
         mc_version: new.mc_version,
         loader: new.loader,
         loader_version: None,
-        min_ram_mb: 1024,
-        max_ram_mb: 4096,
+        min_ram_mb,
+        max_ram_mb,
         width: 854,
         height: 480,
         jvm_args: String::new(),

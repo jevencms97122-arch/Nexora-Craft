@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { invoke } from "@tauri-apps/api/core";
 
 /*
  * Services en ligne du launcher (comptes, amis, actualités, skins, statistiques).
@@ -9,8 +10,49 @@ import { createClient } from "@supabase/supabase-js";
 export const SUPABASE_URL = "https://vmaketngbwbuscynjkac.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKuXBqvQ6XwEejoOQYHF7Q_5tIvP_rw";
 
+/*
+ * Où la session est gardée : dans un fichier du dossier de données du launcher (voir session.rs),
+ * et non dans la mémoire du navigateur intégré. Le joueur reste ainsi connecté d'une version du
+ * launcher à l'autre. La mémoire du navigateur sert de copie de secours, et de point de départ
+ * pour les sessions ouvertes avant ce changement.
+ */
+export const sessionStore = {
+  async getItem(key: string): Promise<string | null> {
+    try {
+      const value = await invoke<string | null>("session_get", { key });
+      if (value !== null) return value;
+    } catch {
+      // Fichier inaccessible : on se rabat sur la copie de secours.
+    }
+    try {
+      const old = localStorage.getItem(key);
+      if (old !== null) invoke("session_set", { key, value: old }).catch(() => {});
+      return old;
+    } catch {
+      return null;
+    }
+  },
+  async setItem(key: string, value: string): Promise<void> {
+    await invoke("session_set", { key, value }).catch(() => {});
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Copie de secours indisponible : le fichier suffit.
+    }
+  },
+  async removeItem(key: string): Promise<void> {
+    await invoke("session_remove", { key }).catch(() => {});
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Voir plus haut.
+    }
+  },
+};
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
+    storage: sessionStore,
     persistSession: true,
     autoRefreshToken: true,
     // Application de bureau : aucune redirection de connexion à lire dans l'adresse.

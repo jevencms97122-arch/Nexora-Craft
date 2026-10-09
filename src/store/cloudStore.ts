@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Session } from "@supabase/supabase-js";
 import { listen } from "@tauri-apps/api/event";
-import { AUTH_CALLBACK_URL, skinUrl, supabase } from "../lib/supabase";
+import { AUTH_CALLBACK_URL, sessionStore, skinUrl, supabase } from "../lib/supabase";
 import { useAccountStore } from "./accountStore";
 import { toast } from "./toastStore";
 
@@ -70,6 +70,8 @@ interface CloudState {
 }
 
 const SKIN_SYNC_KEY = "nexora.skinSynced";
+/// Dernier profil connu, gardé avec la session : il sert quand le launcher démarre sans internet.
+const PROFILE_KEY = "nexora.profile";
 const PENDING_KEY = "nexora.pendingEmail";
 
 function readPending(): string | null {
@@ -119,19 +121,43 @@ async function activateLocalAccount(username: string) {
   else if (existing.uuid !== activeUuid) await setActive(existing.uuid);
 }
 
+/// Vrai si un compte Nexora est connecté sur ce launcher. Attend au besoin que la session
+/// enregistrée ait été relue (au tout début du démarrage).
+export async function isSignedIn(): Promise<boolean> {
+  for (let i = 0; i < 30 && !useCloudStore.getState().ready; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return !!useCloudStore.getState().session;
+}
+
 export const useCloudStore = create<CloudState>((set, get) => {
   async function loadProfile(session: Session | null) {
     if (!session) {
       set({ session: null, profile: null, friends: [], ready: true });
       return;
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("id, username, skin_updated_at")
       .eq("id", session.user.id)
       .maybeSingle();
+
+    let profile = (data as Profile | null) ?? null;
+    if (profile) {
+      sessionStore.setItem(PROFILE_KEY, JSON.stringify(profile));
+    } else if (error) {
+      // Pas de réponse du serveur (hors ligne, coupure) : le joueur reste connecté avec le profil
+      // connu, au lieu d'apparaître déconnecté.
+      try {
+        const cached = JSON.parse((await sessionStore.getItem(PROFILE_KEY)) ?? "null") as Profile | null;
+        if (cached?.id === session.user.id) profile = cached;
+      } catch {
+        // Copie illisible : on fera sans.
+      }
+    }
+
     writePending(null);
-    set({ session, profile: (data as Profile | null) ?? null, ready: true, pendingEmail: null });
+    set({ session, profile, ready: true, pendingEmail: null });
     if (data) {
       get().refreshFriends();
       get().syncSkin();
@@ -240,6 +266,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
       const profile = get().profile;
       if (profile) await supabase.from("presence").delete().eq("user_id", profile.id);
       await supabase.auth.signOut();
+      await sessionStore.removeItem(PROFILE_KEY);
       // Le compte local qui portait le pseudo réservé part avec la déconnexion : sans compte
       // Nexora, ce pseudo ne doit plus être jouable depuis ce launcher.
       if (profile) {

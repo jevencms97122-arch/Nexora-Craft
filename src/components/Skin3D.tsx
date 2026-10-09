@@ -183,6 +183,10 @@ export function Skin3D({ src, slim = false, height, walk = true, className }: Pr
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
+      if (document.hidden) {
+        lastTime = 0;
+        return;
+      }
       const dt = lastTime ? Math.min(0.1, (now - lastTime) / 1000) : 0;
       lastTime = now;
       if (!dragging && now > resumeAt && !reduced) {

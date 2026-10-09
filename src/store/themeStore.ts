@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { BIOMES, type Biome } from "../components/MinecraftScene";
 import { setSoundsEnabled } from "../lib/sound";
 
 export type Theme = "dark" | "light";
@@ -9,6 +10,18 @@ const ACCENT_KEY = "nexora.accent";
 const SCENE_MODE_KEY = "nexora.sceneMode";
 const WEATHER_KEY = "nexora.sceneWeather";
 const SOUNDS_KEY = "nexora.sounds";
+const BIOME_KEY = "nexora.sceneBiome";
+
+/// Décor choisi pour la scène, ou « random » : un biome tiré au sort à chaque ouverture.
+export type BiomeChoice = Biome | "random";
+
+function isBiome(value: string | null): value is Biome {
+  return BIOMES.some((b) => b.id === value);
+}
+
+function randomBiome(): Biome {
+  return BIOMES[Math.floor(Math.random() * BIOMES.length)].id;
+}
 
 /// "theme" : nuit en sombre, jour en clair. "realtime" : la scène suit l'heure de l'ordinateur.
 export type SceneMode = "theme" | "realtime";
@@ -149,6 +162,10 @@ interface ThemeState {
   sceneMode: SceneMode;
   /// Pluie ou neige de temps en temps dans la scène.
   weather: boolean;
+  /// Réglage du décor, et le biome réellement affiché (différent quand le réglage est « random »).
+  biomeChoice: BiomeChoice;
+  biome: Biome;
+  setBiomeChoice: (choice: BiomeChoice) => void;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
   setAnimated: (animated: boolean) => void;
@@ -168,7 +185,15 @@ export const useThemeStore = create<ThemeState>((set, get) => {
   apply(theme, accent);
   const sounds = read(SOUNDS_KEY) !== "0";
   setSoundsEnabled(sounds);
+  const storedBiome = read(BIOME_KEY);
+  const biomeChoice: BiomeChoice = storedBiome === "random" ? "random" : isBiome(storedBiome) ? storedBiome : "plains";
   return {
+    biomeChoice,
+    biome: biomeChoice === "random" ? randomBiome() : biomeChoice,
+    setBiomeChoice: (choice) => {
+      write(BIOME_KEY, choice);
+      set({ biomeChoice: choice, biome: choice === "random" ? randomBiome() : choice });
+    },
     theme,
     animated: initialAnimated(),
     accent,
