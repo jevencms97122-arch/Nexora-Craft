@@ -18,6 +18,7 @@ const SettingsPage = lazy(() => import("./routes/SettingsPage").then((m) => ({ d
 const ContentPage = lazy(() => import("./routes/ContentPage").then((m) => ({ default: m.ContentPage })));
 const InstanceDetailPage = lazy(() => import("./routes/InstanceDetailPage").then((m) => ({ default: m.InstanceDetailPage })));
 const GalleryPage = lazy(() => import("./routes/GalleryPage").then((m) => ({ default: m.GalleryPage })));
+const SmpPage = lazy(() => import("./routes/SmpPage").then((m) => ({ default: m.SmpPage })));
 const MultiPage = lazy(() => import("./routes/MultiPage").then((m) => ({ default: m.MultiPage })));
 import { useAccountStore } from "./store/accountStore";
 import { useBackgroundStore } from "./store/backgroundStore";
@@ -162,6 +163,7 @@ function AppShell() {
             <Route path="/instances" element={<InstancesPage />} />
             <Route path="/instances/:instanceId" element={<InstanceDetailPage />} />
             <Route path="/content" element={<ContentPage />} />
+            <Route path="/smp" element={<SmpPage />} />
             <Route path="/together" element={<MultiPage />} />
             <Route path="/gallery" element={<GalleryPage />} />
             <Route path="/account" element={<AccountPage />} />

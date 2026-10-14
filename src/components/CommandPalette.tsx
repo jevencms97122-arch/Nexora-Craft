@@ -39,6 +39,7 @@ const PAGES: { to: string; label: string; icon: IconName; keywords?: string }[] 
   { to: "/instances", label: "Instances", icon: "grid", keywords: "bibliotheque" },
   { to: "/content", label: "Explorer", icon: "compass", keywords: "mods shaders modrinth modpack textures" },
   { to: "/together", label: "Multi", icon: "users", keywords: "serveurs heberger tunnel jouer ensemble" },
+  { to: "/smp", label: "SMP", icon: "globe", keywords: "nexora smp classement leaderboard serveur joueurs" },
   { to: "/gallery", label: "Galerie", icon: "camera", keywords: "captures screenshots" },
   { to: "/account", label: "Compte", icon: "user", keywords: "skin pseudo garde-robe" },
   { to: "/settings", label: "Réglages", icon: "settings", keywords: "parametres theme couleur memoire" },

@@ -12,6 +12,7 @@ const items: { to: string; label: string; icon: IconName }[] = [
   { to: "/instances", label: "Instances", icon: "grid" },
   { to: "/content", label: "Explorer", icon: "compass" },
   { to: "/together", label: "Multi", icon: "users" },
+  { to: "/smp", label: "SMP", icon: "globe" },
   { to: "/gallery", label: "Galerie", icon: "camera" },
 ];
 
