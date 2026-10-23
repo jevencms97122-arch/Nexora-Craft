@@ -106,6 +106,10 @@ pub fn run() {
             commands::scan_downloads,
             commands::inspect_download,
             commands::install_download,
+            commands::recent_downloads,
+            commands::list_nexora_content,
+            commands::inspect_picked,
+            commands::install_picked,
             commands::remove_wardrobe_skin,
             commands::apply_wardrobe_skin,
         ])

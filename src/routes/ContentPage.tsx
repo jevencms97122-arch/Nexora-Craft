@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { InstallModpackModal } from "../components/InstallModpackModal";
 import { InstallToInstanceModal } from "../components/InstallToInstanceModal";
 import { CurseForgePanel } from "../components/CurseForgePanel";
+import { ImportPanel } from "../components/ImportPanel";
+import { NexoraPanel } from "../components/NexoraPanel";
 const ProjectModal = lazy(() => import("../components/ProjectModal").then((m) => ({ default: m.ProjectModal })));
 import { Icon, PageHeader, Skeleton, Spinner } from "../components/ui";
 import { useImportStore } from "../store/importStore";
@@ -57,9 +59,9 @@ function favoriteHit(fav: Favorite): ModrinthHit {
 export function ContentPage() {
   const { instances, refresh } = useInstanceStore();
   /// Source du contenu : la recherche Modrinth intégrée, ou le site CurseForge dans le navigateur.
-  const [source, setSource] = useState<"modrinth" | "curseforge">("modrinth");
+  const [source, setSource] = useState<"modrinth" | "curseforge" | "files">("modrinth");
   const watching = useImportStore((s) => s.watching);
-  const [tab, setTab] = useState<ContentType | "favorites">("mod");
+  const [tab, setTab] = useState<ContentType | "favorites" | "nexora">("mod");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ModrinthHit[]>([]);
   /// Page affichée (à partir de 0) et nombre total de résultats de la recherche en cours.
@@ -100,7 +102,7 @@ export function ContentPage() {
 
   /// Lance la recherche et affiche la page demandée (la première par défaut).
   async function runSearch(pageIndex = 0) {
-    if (tab === "favorites") return;
+    if (tab === "favorites" || tab === "nexora") return;
     setSearching(true);
     setError(null);
     try {
@@ -118,7 +120,7 @@ export function ContentPage() {
   }
 
   useEffect(() => {
-    if (tab !== "favorites") runSearch();
+    if (tab !== "favorites" && tab !== "nexora") runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -141,12 +143,12 @@ export function ContentPage() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow={source === "modrinth" ? "Modrinth" : "CurseForge"}
+        eyebrow={source === "modrinth" ? "Modrinth" : source === "curseforge" ? "CurseForge" : "Import"}
         title="Explorer"
         subtitle="Mods, shaders, packs de textures et modpacks, installés en un clic dans tes instances."
         actions={
           <div className="flex rounded-xl bg-panel-2 border border-border-strong p-1">
-            {(["modrinth", "curseforge"] as const).map((s) => (
+            {(["modrinth", "curseforge", "files"] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setSource(s)}
@@ -154,7 +156,7 @@ export function ContentPage() {
                   source === s ? "bg-accent text-accent-ink" : "text-text-muted hover:text-text"
                 }`}
               >
-                {s === "modrinth" ? "Modrinth" : "CurseForge"}
+                {s === "modrinth" ? "Modrinth" : s === "curseforge" ? "CurseForge" : "Mes fichiers"}
                 {s === "curseforge" && watching && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
               </button>
             ))}
@@ -162,7 +164,9 @@ export function ContentPage() {
         }
       />
 
-      {source === "curseforge" ? (
+      {source === "files" ? (
+        <ImportPanel />
+      ) : source === "curseforge" ? (
         <CurseForgePanel />
       ) : (
         <>
@@ -177,9 +181,14 @@ export function ContentPage() {
           <Icon name="star" filled className="w-3.5 h-3.5" /> Favoris
           {favorites.length > 0 && <span className="opacity-70">{favorites.length}</span>}
         </button>
+        <button onClick={() => setTab("nexora")} className={`chip ${tab === "nexora" ? "chip-active" : ""}`}>
+          <Icon name="sparkles" className="w-3.5 h-3.5" /> Nexora
+        </button>
       </div>
 
-      {tab === "favorites" ? (
+      {tab === "nexora" ? (
+        <NexoraPanel />
+      ) : tab === "favorites" ? (
         <>
           <div className="flex gap-1.5 flex-wrap">
             {FAVORITE_CATEGORIES.map((c) => (
@@ -385,7 +394,7 @@ export function ContentPage() {
         ) : (
           <InstallToInstanceModal
             hit={selectedHit}
-            contentType={tab === "favorites" ? (selectedHit.project_type as ContentType) : tab}
+            contentType={tab === "favorites" || tab === "nexora" ? (selectedHit.project_type as ContentType) : tab}
             instances={instances}
             onClose={() => setSelectedHit(null)}
             onInstalled={() => toast.success(`${selectedHit.title} installé`)}

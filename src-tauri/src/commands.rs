@@ -627,6 +627,29 @@ pub fn inspect_download(app: AppHandle, path: String) -> AppResult<crate::import
     Ok(info)
 }
 
+/// Les fichiers récents de Téléchargements, à proposer à l'import.
+#[tauri::command]
+pub fn recent_downloads() -> AppResult<Vec<crate::imports::DownloadedFile>> {
+    crate::imports::recent(12)
+}
+
+/// Contenu fourni par Nexora (dossier `nexora-content/`), avec sa compatibilité par instance.
+#[tauri::command]
+pub fn list_nexora_content(app: AppHandle) -> AppResult<Vec<crate::imports::FileInfo>> {
+    crate::imports::nexora_content(&app)
+}
+
+/// Analyse un fichier choisi par le joueur (sélecteur ou glisser-déposer).
+#[tauri::command]
+pub fn inspect_picked(path: String) -> AppResult<crate::imports::FileInfo> {
+    crate::imports::inspect_picked(&path)
+}
+
+#[tauri::command]
+pub fn install_picked(path: String, instance_id: String) -> AppResult<InstalledContent> {
+    crate::imports::install_picked(&path, &instance_id)
+}
+
 #[tauri::command]
 pub fn install_download(path: String, instance_id: String) -> AppResult<InstalledContent> {
     crate::imports::install(&path, &instance_id)

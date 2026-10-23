@@ -49,7 +49,7 @@ export function ImportModal() {
     if (!file) return;
     setBusy(instanceId);
     try {
-      await api.installDownload(file.path, instanceId);
+      await (file.picked ? api.installPicked : api.installDownload)(file.path, instanceId);
       toast.success(`${file.title} installé dans ${name}`);
       dismiss();
     } catch (e) {
@@ -61,7 +61,7 @@ export function ImportModal() {
 
   return (
     <Modal onClose={dismiss} width={540}>
-      <div className="eyebrow mb-2">Fichier téléchargé détecté</div>
+      <div className="eyebrow mb-2">{file.picked ? "Fichier à importer" : "Fichier téléchargé détecté"}</div>
       <div className="flex items-start gap-3 mb-5">
         <div className="icon-tile w-12 h-12 flex items-center justify-center text-accent shrink-0">
           <Icon name={kind.icon} className="w-6 h-6" />
@@ -83,7 +83,7 @@ export function ImportModal() {
 
       {rows.length === 0 ? (
         <div className="empty-state">
-          <p className="text-sm">Tu n'as encore aucune instance. Crée-en une, puis retélécharge le fichier.</p>
+          <p className="text-sm">Tu n'as encore aucune instance. Crée-en une, puis réimporte le fichier.</p>
         </div>
       ) : (
         <>
@@ -121,7 +121,9 @@ export function ImportModal() {
         <span className="text-[11px] text-text-faint">
           {remaining > 0
             ? `${remaining} autre${remaining > 1 ? "s" : ""} fichier${remaining > 1 ? "s" : ""} en attente`
-            : "Le fichier reste dans ton dossier Téléchargements."}
+            : file.picked
+              ? "Le fichier d'origine n'est pas déplacé : il est copié."
+              : "Le fichier reste dans ton dossier Téléchargements."}
         </span>
         <button onClick={dismiss} className="btn btn-ghost">
           Ignorer

@@ -175,6 +175,13 @@ export const api = {
   scanDownloads: (sinceMs: number) => invoke<DownloadedFile[]>("scan_downloads", { sinceMs }),
   inspectDownload: (path: string) => invoke<ImportedFile>("inspect_download", { path }),
   installDownload: (path: string, instanceId: string) => invoke<InstalledContent>("install_download", { path, instanceId }),
+  /// Mods, packs et shaders fournis par Nexora, avec leur compatibilité par instance.
+  nexoraContent: () => invoke<ImportedFile[]>("list_nexora_content"),
+  /// Fichiers récents de Téléchargements, à proposer à l'import.
+  recentDownloads: () => invoke<DownloadedFile[]>("recent_downloads"),
+  /// Fichier choisi à la main (sélecteur ou glisser-déposer), où qu'il soit sur le disque.
+  inspectPicked: (path: string) => invoke<ImportedFile>("inspect_picked", { path }),
+  installPicked: (path: string, instanceId: string) => invoke<InstalledContent>("install_picked", { path, instanceId }),
   /// Musiques trouvées dans les fichiers du jeu déjà téléchargés.
   listGameMusic: () => invoke<{ id: string; name: string; path: string }[]>("list_game_music"),
   removeWardrobeSkin: (id: string) => invoke<void>("remove_wardrobe_skin", { id }),

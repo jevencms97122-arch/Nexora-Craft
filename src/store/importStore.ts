@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import type { ImportedFile } from "../lib/types";
+import { toast } from "./toastStore";
 
 /*
  * Import de fichiers téléchargés à la main (mode CurseForge de l'onglet Explorer).
@@ -25,6 +26,8 @@ interface ImportState {
   stop: () => void;
   /// Retire le premier fichier de la file (installé ou ignoré).
   dismiss: () => void;
+  /// Analyse des fichiers choisis à la main (sélecteur, glisser-déposer, liste de Téléchargements).
+  importPaths: (paths: string[]) => Promise<void>;
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -98,5 +101,21 @@ export const useImportStore = create<ImportState>((set, get) => {
     },
 
     dismiss: () => set((state) => ({ queue: state.queue.slice(1) })),
+
+    importPaths: async (paths) => {
+      const wanted = paths.filter((p) => /\.(jar|zip)$/i.test(p));
+      if (wanted.length === 0) {
+        if (paths.length > 0) toast.error("Seuls les fichiers .jar et .zip peuvent être importés.");
+        return;
+      }
+      for (const path of wanted) {
+        try {
+          const info = await api.inspectPicked(path);
+          set((state) => ({ queue: [...state.queue, { ...info, picked: true }] }));
+        } catch (e) {
+          toast.error(`${path.split(/[\/]/).pop()} : ${String(e)}`);
+        }
+      }
+    },
   };
 });

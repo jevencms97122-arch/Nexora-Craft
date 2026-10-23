@@ -20,6 +20,8 @@ pub struct DownloadedFile {
     pub path: String,
     pub name: String,
     pub size: u64,
+    /// Dernière modification, en millisecondes depuis 1970.
+    pub modified: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -103,9 +105,75 @@ pub fn scan(since_ms: u64) -> AppResult<Vec<DownloadedFile>> {
         if in_progress {
             continue;
         }
-        found.push(DownloadedFile { path: path.to_string_lossy().to_string(), name, size: meta.len() });
+        found.push(DownloadedFile {
+            path: path.to_string_lossy().to_string(),
+            name,
+            size: meta.len(),
+            modified: millis(meta.modified()),
+        });
     }
     Ok(found)
+}
+
+/// Les fichiers `.jar`/`.zip` les plus récents de Téléchargements, pour les proposer à l'import.
+pub fn recent(limit: usize) -> AppResult<Vec<DownloadedFile>> {
+    let mut files = scan(0)?;
+    files.sort_by(|a, b| b.modified.cmp(&a.modified));
+    files.truncate(limit);
+    Ok(files)
+}
+
+/// Dossier du contenu Nexora, embarqué avec le launcher (voir `nexora-content/` à la racine du projet).
+/// En développement, le dossier du projet est lu directement : un fichier ajouté apparaît tout de suite.
+fn nexora_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    #[cfg(debug_assertions)]
+    {
+        let project = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("nexora-content");
+        if project.is_dir() {
+            return Some(project);
+        }
+    }
+    let bundled = app.path().resource_dir().ok()?.join("nexora-content");
+    bundled.is_dir().then_some(bundled)
+}
+
+/// Les mods, packs de ressources et shaders fournis par Nexora, analysés comme n'importe quel
+/// fichier importé (type, loader, versions de Minecraft, compatibilité avec chaque instance).
+pub fn nexora_content(app: &tauri::AppHandle) -> AppResult<Vec<FileInfo>> {
+    let Some(root) = nexora_dir(app) else { return Ok(Vec::new()) };
+    let mut files = Vec::new();
+    for sub in ["", "mods", "resourcepacks", "shaders"] {
+        let dir = if sub.is_empty() { root.clone() } else { root.join(sub) };
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || !is_candidate(&path) {
+                continue;
+            }
+            // Un fichier illisible (archive abîmée) est simplement laissé de côté.
+            if let Ok(info) = inspect_picked(&path.to_string_lossy()) {
+                files.push(info);
+            }
+        }
+    }
+    files.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    Ok(files)
+}
+
+/// Taille maximale d'un fichier choisi à la main : au-delà, ce n'est pas un mod ni un pack.
+const MAX_PICKED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Fichier choisi par le joueur (sélecteur ou glisser-déposer), où qu'il soit sur le disque : seuls
+/// les `.jar`/`.zip` de taille raisonnable sont acceptés, et jamais autre chose que des fichiers.
+fn checked_picked_path(path: &str) -> AppResult<PathBuf> {
+    let refused = || AppError::Other("seuls les fichiers .jar et .zip peuvent être importés".into());
+    let file = Path::new(path).canonicalize().map_err(|_| refused())?;
+    let meta = std::fs::metadata(&file).map_err(|_| refused())?;
+    if !meta.is_file() || !is_candidate(&file) || meta.len() == 0 || meta.len() > MAX_PICKED_BYTES {
+        return Err(refused());
+    }
+    Ok(file)
 }
 
 /// N'accepte que les fichiers `.jar`/`.zip` situés directement dans Téléchargements : l'interface
@@ -452,7 +520,15 @@ fn open(path: &Path) -> AppResult<Archive> {
 
 /// Analyse un fichier téléchargé et le compare à toutes les instances.
 pub fn inspect(path: &str) -> AppResult<FileInfo> {
-    let file = checked_path(path)?;
+    inspect_file(checked_path(path)?)
+}
+
+/// Comme `inspect`, pour un fichier choisi à la main n'importe où sur le disque.
+pub fn inspect_picked(path: &str) -> AppResult<FileInfo> {
+    inspect_file(checked_picked_path(path)?)
+}
+
+fn inspect_file(file: PathBuf) -> AppResult<FileInfo> {
     let parsed = parse_archive(&mut open(&file)?);
     let file_name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
     let stem = file.file_stem().unwrap_or_default().to_string_lossy().to_string();
@@ -478,7 +554,15 @@ pub fn inspect(path: &str) -> AppResult<FileInfo> {
 
 /// Copie le fichier dans l'instance. Refusé si l'analyse le déclare incompatible.
 pub fn install(path: &str, instance_id: &str) -> AppResult<InstalledContent> {
-    let file = checked_path(path)?;
+    install_file(checked_path(path)?, instance_id)
+}
+
+/// Comme `install`, pour un fichier choisi à la main n'importe où sur le disque.
+pub fn install_picked(path: &str, instance_id: &str) -> AppResult<InstalledContent> {
+    install_file(checked_picked_path(path)?, instance_id)
+}
+
+fn install_file(file: PathBuf, instance_id: &str) -> AppResult<InstalledContent> {
     let parsed = parse_archive(&mut open(&file)?);
     let instance = instances::get(instance_id)?;
     let (verdict, reason) = check_instance(&parsed, &instance);
@@ -502,6 +586,24 @@ mod tests {
 
     fn mc(text: &str) -> Vec<u32> {
         parse_version(text).unwrap()
+    }
+
+    #[test]
+    fn picked_files_must_be_real_jar_or_zip_files() {
+        let dir = std::env::temp_dir().join(format!("nexora-picked-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("mod.jar");
+        let txt = dir.join("notes.txt");
+        let empty = dir.join("empty.zip");
+        std::fs::write(&jar, b"PK").unwrap();
+        std::fs::write(&txt, b"x").unwrap();
+        std::fs::write(&empty, b"").unwrap();
+        assert!(checked_picked_path(jar.to_str().unwrap()).is_ok());
+        assert!(checked_picked_path(txt.to_str().unwrap()).is_err());
+        assert!(checked_picked_path(empty.to_str().unwrap()).is_err());
+        assert!(checked_picked_path(dir.to_str().unwrap()).is_err());
+        assert!(checked_picked_path(dir.join("absent.jar").to_str().unwrap()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

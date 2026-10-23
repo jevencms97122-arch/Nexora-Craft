@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { CommandPalette } from "./components/CommandPalette";
 import { CrashModal } from "./components/CrashModal";
+import { DropImport } from "./components/DropImport";
 import { ImportModal } from "./components/ImportModal";
 import { MinecraftScene } from "./components/MinecraftScene";
 import { Onboarding, needsOnboarding } from "./components/Onboarding";
@@ -174,6 +175,7 @@ function AppShell() {
       </div>
       <CrashModal />
       <ImportModal />
+      <DropImport />
       <CommandPalette />
       <UpdatePrompt />
       <Toasts />

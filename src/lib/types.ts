@@ -209,6 +209,8 @@ export interface DownloadedFile {
   path: string;
   name: string;
   size: number;
+  /// Dernière modification, en millisecondes depuis 1970.
+  modified: number;
 }
 
 export type ImportKind = "mod" | "resourcepack" | "shader" | "datapack" | "modpack" | "unknown";
@@ -223,6 +225,8 @@ export interface ImportedFile {
   /// Versions de Minecraft annoncées par le fichier, telles qu'il les écrit.
   minecraft: string | null;
   compat: { instance_id: string; verdict: ImportVerdict; reason: string }[];
+  /// Fichier choisi à la main (et non repéré dans Téléchargements).
+  picked?: boolean;
 }
 
 // ---------- Page d'un projet Modrinth ----------
