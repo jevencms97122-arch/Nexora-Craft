@@ -47,7 +47,51 @@ impl Default for Settings {
     }
 }
 
-pub fn load() -> AppResult<Settings> {
+/*
+ * La clé secrète de « Jouer ensemble » est gardée dans le coffre d'identifiants de Windows, pas
+ * dans settings.json. Pour le reste du code rien ne change : `load` la remet dans `Settings`, et
+ * `save` la range dans le coffre. Si le coffre est indisponible, elle reste dans le fichier
+ * (mieux vaut une clé en clair que perdue).
+ */
+
+#[cfg(windows)]
+mod vault {
+    const SERVICE: &str = "NexoraCraft";
+    const USER: &str = "together_secret_key";
+
+    fn entry() -> Option<keyring::Entry> {
+        keyring::Entry::new(SERVICE, USER).ok()
+    }
+
+    pub fn get() -> Option<String> {
+        entry()?.get_password().ok().filter(|s| !s.is_empty())
+    }
+
+    /// Range la clé dans le coffre (ou l'en retire si elle est vide). Retourne vrai si le coffre
+    /// a bien pris la modification.
+    pub fn set(secret: Option<&str>) -> bool {
+        let Some(entry) = entry() else { return false };
+        match secret {
+            Some(secret) => entry.set_password(secret).is_ok(),
+            None => match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => true,
+                Err(_) => false,
+            },
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod vault {
+    pub fn get() -> Option<String> {
+        None
+    }
+    pub fn set(_secret: Option<&str>) -> bool {
+        false
+    }
+}
+
+fn read_file() -> AppResult<Settings> {
     let file = paths::settings_file();
     if !file.exists() {
         return Ok(Settings::default());
@@ -59,8 +103,32 @@ pub fn load() -> AppResult<Settings> {
     Ok(serde_json::from_str(&data)?)
 }
 
-pub fn save(settings: &Settings) -> AppResult<()> {
+fn write_file(settings: &Settings) -> AppResult<()> {
     paths::ensure_dirs()?;
     fs::write(paths::settings_file(), serde_json::to_string_pretty(settings)?)?;
     Ok(())
+}
+
+pub fn load() -> AppResult<Settings> {
+    let mut settings = read_file()?;
+    // Clé encore en clair dans le fichier (ancienne version) : elle passe dans le coffre.
+    if let Some(secret) = settings.together_secret_key.clone().filter(|s| !s.is_empty()) {
+        if vault::set(Some(&secret)) {
+            let mut cleaned = settings.clone();
+            cleaned.together_secret_key = None;
+            let _ = write_file(&cleaned);
+        }
+    } else if let Some(secret) = vault::get() {
+        settings.together_secret_key = Some(secret);
+    }
+    Ok(settings)
+}
+
+pub fn save(settings: &Settings) -> AppResult<()> {
+    let secret = settings.together_secret_key.as_deref().filter(|s| !s.is_empty());
+    let mut stored = settings.clone();
+    if vault::set(secret) {
+        stored.together_secret_key = None;
+    }
+    write_file(&stored)
 }

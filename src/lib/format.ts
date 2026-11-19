@@ -27,6 +27,62 @@ export function formatRam(megabytes: number): string {
   return `${Number.isInteger(gigabytes) ? gigabytes : gigabytes.toFixed(1).replace(".", ",")} Go`;
 }
 
+/// « 1 536 000 » → « 1,5 Mo ».
+export function formatBytes(bytes: number) {
+  const units = ["o", "Ko", "Mo", "Go"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const text = unit === 0 || value >= 10 ? Math.round(value).toString() : value.toFixed(1).replace(".", ",");
+  return `${text} ${units[unit]}`;
+}
+
+export interface RamAdvice {
+  /// Mémoire conseillée, en Mo.
+  suggestedMb: number;
+  level: "warn" | "danger";
+  message: string;
+}
+
+/// Conseil de mémoire pour une instance, ou null si le réglage est raisonnable.
+/// `totalMb` : mémoire du PC (nul si inconnue) ; `modCount` : nombre de mods actifs.
+export function ramAdvice(totalMb: number | null, maxMb: number, minMb: number, modCount: number): RamAdvice | null {
+  const wantGb = modCount === 0 ? 3 : modCount < 40 ? 4 : modCount < 100 ? 6 : 8;
+  // Le jeu ne doit jamais prendre plus de la moitié de la mémoire du PC.
+  const capGb = totalMb ? Math.max(2, Math.floor(totalMb / 2 / 1024)) : wantGb;
+  const suggestedGb = Math.min(wantGb, capGb);
+  const suggestedMb = suggestedGb * 1024;
+
+  if (minMb > maxMb) {
+    return { suggestedMb, level: "danger", message: "La mémoire minimale dépasse la mémoire maximale : le jeu ne démarrera pas." };
+  }
+  if (totalMb && maxMb > totalMb * 0.8) {
+    return {
+      suggestedMb,
+      level: "danger",
+      message: `${formatRam(maxMb)} sur un PC de ${formatRam(totalMb)} : Windows et le jeu vont se disputer la mémoire. ${suggestedGb} Go suffisent.`,
+    };
+  }
+  if (totalMb && maxMb > totalMb * 0.6) {
+    return {
+      suggestedMb,
+      level: "warn",
+      message: `Ça laisse peu de mémoire à Windows et à tes autres applications (PC de ${formatRam(totalMb)}). ${suggestedGb} Go suffisent.`,
+    };
+  }
+  if (modCount >= 40 && maxMb < wantGb * 1024 * 0.75) {
+    return {
+      suggestedMb,
+      level: "warn",
+      message: `Avec ${modCount} mods, ${suggestedGb} Go sont conseillés : le jeu risque de saccader ou de planter.`,
+    };
+  }
+  return null;
+}
+
 export function isValidUsername(name: string) {
   return /^[A-Za-z0-9_]{3,16}$/.test(name);
 }

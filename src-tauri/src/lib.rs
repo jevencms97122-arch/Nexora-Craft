@@ -1,6 +1,7 @@
 mod accounts;
 mod ai;
 mod auth;
+mod backups;
 mod callback;
 mod commands;
 mod content;
@@ -22,6 +23,7 @@ mod settings;
 mod share;
 mod skins;
 mod state;
+mod system;
 mod together;
 
 use state::AppState;
@@ -112,6 +114,16 @@ pub fn run() {
             commands::install_picked,
             commands::remove_wardrobe_skin,
             commands::apply_wardrobe_skin,
+            commands::duplicate_instance,
+            commands::change_instance_version,
+            commands::open_instance_folder,
+            commands::list_worlds,
+            commands::list_backups,
+            commands::backup_world,
+            commands::restore_backup,
+            commands::delete_backup,
+            commands::export_instance_mrpack,
+            commands::system_memory_mb,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

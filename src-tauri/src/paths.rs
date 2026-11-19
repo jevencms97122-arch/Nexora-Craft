@@ -14,6 +14,11 @@ pub fn instance_dir(instance_id: &str) -> PathBuf {
     instances_root_dir().join(instance_id)
 }
 
+/// Sauvegardes de mondes : un sous-dossier par instance.
+pub fn backups_dir() -> PathBuf {
+    app_data_dir().join("backups")
+}
+
 pub fn runtimes_dir() -> PathBuf {
     app_data_dir().join("runtimes")
 }

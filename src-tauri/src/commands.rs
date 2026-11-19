@@ -72,6 +72,109 @@ pub fn delete_instance(id: String) -> AppResult<()> {
     instances::delete(&id)
 }
 
+/// Copie d'une instance, avec ou sans ses mondes.
+#[tauri::command]
+pub async fn duplicate_instance(instance_id: String, name: String, with_worlds: bool) -> AppResult<Instance> {
+    tokio::task::spawn_blocking(move || instances::duplicate(&instance_id, &name, with_worlds))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Change la version de Minecraft et/ou le loader d'une instance existante. Les mondes sont
+/// sauvegardés avant, au cas où la nouvelle version les abîmerait.
+#[tauri::command]
+pub async fn change_instance_version(
+    state: State<'_, AppState>,
+    instance_id: String,
+    mc_version: String,
+    loader: Loader,
+) -> AppResult<Instance> {
+    let mut instance = instances::get(&instance_id)?;
+    if instance.mc_version == mc_version && instance.loader == loader {
+        return Ok(instance);
+    }
+
+    // La version du loader est cherchée d'abord : si elle n'existe pas pour cette version de
+    // Minecraft, rien n'est modifié ni sauvegardé.
+    let loader_version = if let Some(kind) = loader_kind_for(&loader) {
+        Some(minecraft::loaders::resolve_recommended_version(&state.http, kind, &mc_version).await?)
+    } else if let Some(kind) = forge_kind_for(&loader) {
+        Some(minecraft::forge::resolve_recommended_version(&state.http, kind, &mc_version).await?)
+    } else {
+        None
+    };
+
+    let id = instance_id.clone();
+    tokio::task::spawn_blocking(move || crate::backups::backup_all(&id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))??;
+
+    instance.mc_version = mc_version;
+    instance.loader = loader;
+    instance.loader_version = loader_version;
+    instances::update(instance)
+}
+
+#[tauri::command]
+pub fn open_instance_folder(instance_id: String, sub: Option<String>) -> AppResult<()> {
+    instances::open_folder(&instance_id, sub.as_deref())
+}
+
+// ---------- Sauvegardes de mondes ----------
+
+#[tauri::command]
+pub fn list_worlds(instance_id: String) -> AppResult<Vec<crate::backups::World>> {
+    crate::backups::list_worlds(&instance_id)
+}
+
+#[tauri::command]
+pub fn list_backups(instance_id: String) -> AppResult<Vec<crate::backups::Backup>> {
+    crate::backups::list_backups(&instance_id)
+}
+
+#[tauri::command]
+pub async fn backup_world(instance_id: String, world: String) -> AppResult<crate::backups::Backup> {
+    tokio::task::spawn_blocking(move || crate::backups::backup_world(&instance_id, &world))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn restore_backup(instance_id: String, file_name: String) -> AppResult<()> {
+    tokio::task::spawn_blocking(move || crate::backups::restore(&instance_id, &file_name))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub fn delete_backup(instance_id: String, file_name: String) -> AppResult<()> {
+    crate::backups::delete(&instance_id, &file_name)
+}
+
+// ---------- Export ----------
+
+/// Exporte l'instance dans un fichier `.mrpack` (format Modrinth).
+#[tauri::command]
+pub async fn export_instance_mrpack(
+    state: State<'_, AppState>,
+    instance_id: String,
+    dest: String,
+) -> AppResult<content::export::ExportSummary> {
+    let dest = std::path::PathBuf::from(dest);
+    if dest.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref() != Some("mrpack") {
+        return Err(AppError::Other("le fichier doit se terminer par .mrpack".into()));
+    }
+    content::export::export_mrpack(&state.http, &instance_id, &dest).await
+}
+
+// ---------- Ordinateur ----------
+
+/// Mémoire vive totale du PC, en Mo, pour conseiller une quantité de RAM au jeu.
+#[tauri::command]
+pub fn system_memory_mb() -> Option<u64> {
+    crate::system::total_memory_mb()
+}
+
 // ---------- Versions Minecraft ----------
 
 #[tauri::command]

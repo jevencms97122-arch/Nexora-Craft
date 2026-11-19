@@ -1,3 +1,4 @@
+pub mod export;
 pub mod modpack;
 
 use serde::{Deserialize, Serialize};

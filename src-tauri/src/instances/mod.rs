@@ -184,7 +184,120 @@ pub fn delete(id: &str) -> AppResult<()> {
     if dir.exists() {
         fs::remove_dir_all(dir)?;
     }
+    // Les sauvegardes de l'instance n'ont plus de raison d'être : l'interface ne les montrerait plus.
+    let backups = paths::backups_dir().join(id);
+    if backups.exists() {
+        let _ = fs::remove_dir_all(backups);
+    }
     Ok(())
+}
+
+/// Copie un dossier. `skip` liste les noms ignorés à la racine de la copie.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path, skip: &[&str]) -> AppResult<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if skip.iter().any(|s| name == *s) {
+            continue;
+        }
+        let path = entry.path();
+        let dest = to.join(&name);
+        if path.is_dir() {
+            copy_dir(&path, &dest, &[])?;
+        } else {
+            fs::copy(&path, &dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// Chemin d'une image de l'instance recopiée : il doit désormais pointer dans le nouveau dossier.
+fn moved_image(path: &Option<String>, from: &std::path::Path, to: &std::path::Path) -> Option<String> {
+    let path = path.as_ref()?;
+    match std::path::Path::new(path).strip_prefix(from) {
+        Ok(relative) => Some(to.join(relative).display().to_string()),
+        // Icône distante (modpack) : l'adresse reste valable telle quelle.
+        Err(_) => Some(path.clone()),
+    }
+}
+
+/// Crée une copie d'une instance : réglages, mods, configuration et, au choix, les mondes.
+/// Les captures d'écran, les journaux et les rapports de plantage ne sont pas copiés.
+pub fn duplicate(id: &str, name: &str, with_worlds: bool) -> AppResult<Instance> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Other("le nom de l'instance ne peut pas être vide".into()));
+    }
+    let mut instances = load_all()?;
+    let source = instances
+        .iter()
+        .find(|i| i.id == id)
+        .cloned()
+        .ok_or_else(|| AppError::InstanceNotFound(id.to_string()))?;
+
+    let new_id = Uuid::new_v4().to_string();
+    let from = paths::instance_dir(id);
+    let to = paths::instance_dir(&new_id);
+
+    let mut skip = vec!["screenshots", "logs", "crash-reports"];
+    if !with_worlds {
+        skip.push("saves");
+    }
+    if let Err(e) = copy_dir(&from, &to, &skip) {
+        let _ = fs::remove_dir_all(&to);
+        return Err(e);
+    }
+    fs::create_dir_all(to.join("saves"))?;
+
+    let copy = Instance {
+        id: new_id,
+        name: name.to_string(),
+        created_at: Utc::now(),
+        last_played: None,
+        playtime_seconds: 0,
+        icon: moved_image(&source.icon, &from, &to),
+        banner: moved_image(&source.banner, &from, &to),
+        ..source
+    };
+    instances.push(copy.clone());
+    save_all(&instances)?;
+    Ok(copy)
+}
+
+/// Dossiers de l'instance que l'interface peut ouvrir dans l'explorateur.
+const OPENABLE: [&str; 6] = ["mods", "saves", "config", "resourcepacks", "shaderpacks", "datapacks"];
+
+/// Ouvre le dossier de l'instance (`sub` absent), l'un de ses sous-dossiers, ou le dossier de ses
+/// sauvegardes (`backups`).
+pub fn open_folder(id: &str, sub: Option<&str>) -> AppResult<()> {
+    get(id)?;
+    let dir = match sub {
+        None => paths::instance_dir(id),
+        Some("backups") => paths::backups_dir().join(id),
+        Some(sub) if OPENABLE.contains(&sub) => paths::instance_dir(id).join(sub),
+        Some(_) => return Err(AppError::Other("dossier non autorisé".into())),
+    };
+    fs::create_dir_all(&dir)?;
+    open::that(dir).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copied_images_point_into_the_new_folder() {
+        let from = std::path::Path::new("C:/data/instances/a");
+        let to = std::path::Path::new("C:/data/instances/b");
+        let local = Some("C:/data/instances/a/.nexora-icon-1.png".to_string());
+        let moved = moved_image(&local, from, to).unwrap();
+        assert!(moved.replace('\\', "/").ends_with("instances/b/.nexora-icon-1.png"));
+
+        let remote = Some("https://cdn.modrinth.com/icon.png".to_string());
+        assert_eq!(moved_image(&remote, from, to), remote);
+        assert_eq!(moved_image(&None, from, to), None);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

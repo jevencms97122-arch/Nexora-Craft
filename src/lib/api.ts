@@ -3,6 +3,9 @@ import type {
   Account,
   AccountsFile,
   AiReport,
+  Backup,
+  ExportSummary,
+  World,
   ContentType,
   ContentUpdate,
   DownloadedFile,
@@ -18,6 +21,7 @@ import type {
   Favorite,
   Instance,
   InstalledContent,
+  Loader,
   ModrinthSearchResponse,
   NewInstance,
   ProjectVersion,
@@ -37,6 +41,29 @@ export const api = {
   /// Icône ou bannière personnalisée ; `path` nul retire l'image.
   setInstanceImage: (instanceId: string, kind: "icon" | "banner", path: string | null) =>
     invoke<Instance>("set_instance_image", { instanceId, kind, path }),
+
+  /// Copie d'une instance ; les mondes ne sont recopiés que si `withWorlds`.
+  duplicateInstance: (instanceId: string, name: string, withWorlds: boolean) =>
+    invoke<Instance>("duplicate_instance", { instanceId, name, withWorlds }),
+  /// Change la version de Minecraft et/ou le loader ; les mondes sont sauvegardés avant.
+  changeInstanceVersion: (instanceId: string, mcVersion: string, loader: Loader) =>
+    invoke<Instance>("change_instance_version", { instanceId, mcVersion, loader }),
+  /// Ouvre le dossier de l'instance, un de ses sous-dossiers, ou celui de ses sauvegardes.
+  openInstanceFolder: (instanceId: string, sub?: string) =>
+    invoke<void>("open_instance_folder", { instanceId, sub: sub ?? null }),
+
+  listWorlds: (instanceId: string) => invoke<World[]>("list_worlds", { instanceId }),
+  listBackups: (instanceId: string) => invoke<Backup[]>("list_backups", { instanceId }),
+  backupWorld: (instanceId: string, world: string) => invoke<Backup>("backup_world", { instanceId, world }),
+  restoreBackup: (instanceId: string, fileName: string) => invoke<void>("restore_backup", { instanceId, fileName }),
+  deleteBackup: (instanceId: string, fileName: string) => invoke<void>("delete_backup", { instanceId, fileName }),
+
+  /// Exporte l'instance en `.mrpack` (format Modrinth) vers `dest`.
+  exportInstanceMrpack: (instanceId: string, dest: string) =>
+    invoke<ExportSummary>("export_instance_mrpack", { instanceId, dest }),
+
+  /// Mémoire vive totale du PC, en Mo (nul si illisible).
+  systemMemoryMb: () => invoke<number | null>("system_memory_mb"),
 
   listMcVersions: () => invoke<VersionManifest>("list_mc_versions"),
 

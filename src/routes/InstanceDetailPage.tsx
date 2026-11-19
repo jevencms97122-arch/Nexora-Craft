@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { ChangeVersionModal, DuplicateInstanceModal } from "../components/InstanceActionModals";
+import { RamAdvice } from "../components/RamAdvice";
 import { ShareCodeModal } from "../components/ShareModals";
-import { open } from "@tauri-apps/plugin-dialog";
+import { WorldBackups } from "../components/WorldBackups";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   Icon,
   InstanceIcon,
@@ -66,6 +69,11 @@ export function InstanceDetailPage() {
   const [updating, setUpdating] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
   const [showShare, setShowShare] = useState(false);
+  const [showDuplicate, setShowDuplicate] = useState(false);
+  const [showVersion, setShowVersion] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  /// Incrémenté quand les mondes ont pu changer (nouvelle version, sauvegarde automatique...).
+  const [worldsKey, setWorldsKey] = useState(0);
 
   useEffect(() => {
     refresh();
@@ -207,6 +215,28 @@ export function InstanceDetailPage() {
     }
   }
 
+  /// Exporte l'instance en .mrpack : mods Modrinth liés par adresse, fichiers à soi embarqués.
+  async function handleExport() {
+    if (!instanceId || !form) return;
+    const chosen = await save({
+      defaultPath: `${form.name}.mrpack`,
+      filters: [{ name: "Modpack Modrinth", extensions: ["mrpack"] }],
+    });
+    if (!chosen) return;
+    const dest = chosen.toLowerCase().endsWith(".mrpack") ? chosen : `${chosen}.mrpack`;
+    setExporting(true);
+    try {
+      const summary = await api.exportInstanceMrpack(instanceId, dest);
+      toast.success(
+        `Exporté : ${summary.linked} contenu${summary.linked > 1 ? "s" : ""} Modrinth, ${summary.embedded} fichier${summary.embedded > 1 ? "s" : ""} embarqué${summary.embedded > 1 ? "s" : ""}`,
+      );
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function handleDeleteInstance() {
     if (!instanceId) return;
     await remove(instanceId);
@@ -278,6 +308,7 @@ export function InstanceDetailPage() {
       </div>
 
       <div className="page pt-6 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
+        <div className="flex flex-col gap-8 min-w-0">
         {/* Contenu installé */}
         <section className="flex flex-col gap-4 min-w-0">
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -383,6 +414,9 @@ export function InstanceDetailPage() {
           )}
         </section>
 
+        <WorldBackups instanceId={form.id} running={isRunning} reloadKey={worldsKey} />
+        </div>
+
         {/* Paramètres */}
         <aside className="card p-5 flex flex-col gap-4">
           <h2 className="section-title flex items-center gap-2">
@@ -408,6 +442,14 @@ export function InstanceDetailPage() {
                   {gb} Go
                 </button>
               ))}
+            </div>
+            <div className="col-span-2">
+              <RamAdvice
+                maxMb={form.max_ram_mb}
+                minMb={form.min_ram_mb}
+                modCount={content.filter((c) => c.content_type === "mod" && !c.disabled).length}
+                onApply={(mb) => setForm({ ...form, max_ram_mb: mb, min_ram_mb: Math.min(form.min_ram_mb, mb) })}
+              />
             </div>
             <NumberField label="Largeur" suffix="px" value={form.width} onChange={(v) => setForm({ ...form, width: v })} />
             <NumberField label="Hauteur" suffix="px" value={form.height} onChange={(v) => setForm({ ...form, height: v })} />
@@ -454,9 +496,37 @@ export function InstanceDetailPage() {
             ))}
           </div>
 
-          <button onClick={() => setShowShare(true)} className="btn btn-secondary">
-            <Icon name="share" className="w-4 h-4" /> Partager par code
-          </button>
+          <div className="border-t border-border pt-4 flex flex-col gap-2">
+            <div className="label mb-0">Instance</div>
+            <button onClick={() => api.openInstanceFolder(form.id).catch((e) => toast.error(String(e)))} className="btn btn-secondary">
+              <Icon name="folder" className="w-4 h-4" /> Ouvrir le dossier
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => api.openInstanceFolder(form.id, "mods").catch((e) => toast.error(String(e)))} className="btn btn-ghost btn-sm">
+                <Icon name="folder" className="w-3.5 h-3.5" /> Mods
+              </button>
+              <button onClick={() => api.openInstanceFolder(form.id, "config").catch((e) => toast.error(String(e)))} className="btn btn-ghost btn-sm">
+                <Icon name="folder" className="w-3.5 h-3.5" /> Config
+              </button>
+            </div>
+            <button onClick={() => setShowVersion(true)} disabled={isRunning || isLaunching} className="btn btn-secondary">
+              <Icon name="refresh" className="w-4 h-4" /> Changer de version
+            </button>
+            <button onClick={() => setShowDuplicate(true)} className="btn btn-secondary">
+              <Icon name="copy" className="w-4 h-4" /> Dupliquer
+            </button>
+          </div>
+
+          <div className="border-t border-border pt-4 flex flex-col gap-2">
+            <div className="label mb-0">Partager</div>
+            <button onClick={() => setShowShare(true)} className="btn btn-secondary">
+              <Icon name="share" className="w-4 h-4" /> Partager par code
+            </button>
+            <button onClick={handleExport} disabled={exporting} className="btn btn-secondary" title="Fichier .mrpack lisible par Modrinth, Prism, etc.">
+              {exporting ? <Spinner className="w-4 h-4" /> : <Icon name="upload" className="w-4 h-4" />}
+              {exporting ? "Export en cours" : "Exporter en .mrpack"}
+            </button>
+          </div>
 
           <div className="border-t border-border pt-4">
             {confirmDelete ? (
@@ -481,6 +551,28 @@ export function InstanceDetailPage() {
       </div>
 
       {showShare && <ShareCodeModal instance={form} onClose={() => setShowShare(false)} />}
+      {showDuplicate && (
+        <DuplicateInstanceModal
+          instance={form}
+          onClose={() => setShowDuplicate(false)}
+          onDone={(copy) => {
+            setShowDuplicate(false);
+            navigate(`/instances/${copy.id}`);
+          }}
+        />
+      )}
+      {showVersion && (
+        <ChangeVersionModal
+          instance={form}
+          onClose={() => setShowVersion(false)}
+          onDone={() => {
+            setShowVersion(false);
+            setWorldsKey((k) => k + 1);
+            // Les contenus installés sont revérifiés pour la nouvelle version.
+            loadContent().then(checkUpdates);
+          }}
+        />
+      )}
     </div>
   );
 }

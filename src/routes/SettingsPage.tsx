@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Dropdown, Icon, PageHeader, Spinner, Toggle, type IconName } from "../components/ui";
 import { BIOMES } from "../components/MinecraftScene";
+import { RamAdvice } from "../components/RamAdvice";
 import { formatRam, normalizeRam } from "../lib/format";
 import { setStatsEnabled, statsEnabled } from "../lib/telemetry";
 import { api } from "../lib/api";
@@ -701,6 +702,12 @@ export function SettingsPage() {
             </div>
           ))}
         </div>
+        <RamAdvice
+          maxMb={normalizeRam(settings.default_max_ram_mb)}
+          minMb={normalizeRam(settings.default_min_ram_mb)}
+          modCount={0}
+          onApply={(mb) => setSettings({ ...settings, default_max_ram_mb: mb })}
+        />
         <p className="text-[11px] text-text-faint">
           Clique sur « Enregistrer » en haut de la page pour appliquer : tes instances non réglées à la main suivront.
         </p>

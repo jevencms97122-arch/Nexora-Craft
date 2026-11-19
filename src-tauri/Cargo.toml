@@ -1,6 +1,6 @@
 [package]
 name = "nexora-craft"
-version = "0.1.7"
+version = "0.1.8"
 description = "Nexora Craft - Minecraft Launcher"
 authors = ["Nexora Craft"]
 edition = "2021"
@@ -48,7 +48,10 @@ zip-extract = "0.2"
 urlencoding = "2"
 
 [target.'cfg(windows)'.dependencies]
+# Coffre d'identifiants de Windows : la clé secrète de « Jouer ensemble » n'est plus écrite en clair.
+keyring = { version = "3", features = ["windows-native"] }
 windows = { version = "0.61", features = [
+  "Win32_System_SystemInformation",
   "Win32_Foundation",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",

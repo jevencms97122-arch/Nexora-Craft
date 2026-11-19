@@ -67,11 +67,16 @@ pub struct VersionFile {
     #[serde(default)]
     pub primary: bool,
     pub hashes: VersionFileHashes,
+    /// Taille du fichier en octets.
+    #[serde(default)]
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionFileHashes {
     pub sha1: Option<String>,
+    #[serde(default)]
+    pub sha512: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

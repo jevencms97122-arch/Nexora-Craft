@@ -9,7 +9,7 @@ interface Props {
   onClose: () => void;
 }
 
-const LOADERS: { value: Loader; label: string; hint: string; available: boolean }[] = [
+export const LOADERS: { value: Loader; label: string; hint: string; available: boolean }[] = [
   { value: "vanilla", label: "Vanilla", hint: "Jeu de base", available: true },
   { value: "fabric", label: "Fabric", hint: "Léger, moderne", available: true },
   { value: "quilt", label: "Quilt", hint: "Fork de Fabric", available: true },

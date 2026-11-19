@@ -264,3 +264,23 @@ export interface ProjectDetails {
   updated: string | null;
   published: string | null;
 }
+
+export interface World {
+  name: string;
+  size_bytes: number;
+  modified_ms: number;
+}
+
+export interface Backup {
+  file_name: string;
+  world: string;
+  created_ms: number;
+  size_bytes: number;
+}
+
+export interface ExportSummary {
+  /// Contenus décrits par leur adresse de téléchargement.
+  linked: number;
+  /// Fichiers embarqués dans l'archive.
+  embedded: number;
+}
