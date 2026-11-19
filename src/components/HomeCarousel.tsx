@@ -83,8 +83,8 @@ export function HomeCarousel() {
   }, [loadNews]);
 
   const slides: Slide[] = [
-    ...(server ? [{ type: "server" as const, server }] : []),
     ...news.slice(0, MAX_NEWS_SLIDES).map((item) => ({ type: "news" as const, item })),
+    ...(server ? [{ type: "server" as const, server }] : []),
   ];
   const count = slides.length;
   const current = slides[index % Math.max(count, 1)];

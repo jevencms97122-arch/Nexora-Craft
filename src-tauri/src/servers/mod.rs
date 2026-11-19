@@ -18,7 +18,7 @@ const PING_TIMEOUT: Duration = Duration::from_secs(4);
 /// Serveur officiel du launcher : toujours présent en tête de liste, impossible à retirer.
 const OFFICIAL_ID: &str = "nexora-smp";
 const OFFICIAL_NAME: &str = "Nexora-SMP";
-const OFFICIAL_ADDRESS: &str = "nexora-smp.duckdns.org:25565";
+const OFFICIAL_ADDRESS: &str = "game06-dc02.ouiheberg.com:8756";
 /// Pack officiel du serveur, sous forme de code de partage (version, loader, mods et shaders).
 /// L'instance « Nexora-SMP » est créée à partir de lui. Pour publier un nouveau pack : génère un
 /// code depuis une instance (« Partager par code ») et remplace celui-ci ; les instances déjà
