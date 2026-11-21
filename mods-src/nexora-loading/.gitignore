@@ -1,0 +1,7 @@
+build/
+.gradle/
+run/
+*.iml
+.idea/
+run-server/
+.codegpt-game*

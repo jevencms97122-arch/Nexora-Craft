@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "fr.nexora.loading.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ConnectScreenMixin",
+    "LevelLoadingScreenMixin",
+    "ScreenMixin",
+    "MinecraftMixin",
+    "DisconnectedScreenAccessor"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}

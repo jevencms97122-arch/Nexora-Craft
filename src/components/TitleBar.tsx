@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useUiStore } from "../store/uiStore";
 import { Icon } from "./ui";
 
@@ -56,12 +57,23 @@ function WindowControls() {
 
 export function TitleBar() {
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const navigate = useNavigate();
+  const onSmp = useLocation().pathname === "/smp";
   return (
     <header data-tauri-drag-region className="drag-region h-9 shrink-0 flex items-center justify-between pl-5 select-none">
       <span data-tauri-drag-region className="text-[11px] font-semibold tracking-[0.18em] uppercase text-text-muted">
         Nexora <span className="text-accent">Craft</span>
       </span>
       <div className="flex items-center h-full gap-2">
+        {/* Bascule : Nexora SMP (jouer direct sur le serveur) <-> launcher classique (instances...). */}
+        <button
+          onClick={() => navigate(onSmp ? "/" : "/smp")}
+          title={onSmp ? "Aller au launcher classique" : "Aller à Nexora SMP"}
+          className="no-drag h-6 px-2.5 rounded-lg flex items-center gap-2 text-[11px] font-semibold text-accent hover:text-text bg-panel border border-accent/40 backdrop-blur transition-colors"
+        >
+          <Icon name={onSmp ? "grid" : "globe"} className="w-3 h-3" />
+          {onSmp ? "Launcher classique" : "Nexora SMP"}
+        </button>
         <button
           onClick={() => setPaletteOpen(true)}
           title="Rechercher une commande (Ctrl+K)"

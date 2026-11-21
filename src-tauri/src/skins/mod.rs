@@ -8,6 +8,8 @@ use crate::accounts::Account;
 use crate::error::{AppError, AppResult};
 use crate::paths;
 
+mod model;
+
 const PACK_NAME: &str = "NexoraSkin.zip";
 const PACK_ENTRY: &str = "file/NexoraSkin.zip";
 
@@ -68,7 +70,9 @@ pub async fn set_skin_bytes(
 ) -> AppResult<()> {
     validate_skin_png(&bytes)?;
 
-    let variant = if variant == "slim" { "slim" } else { "classic" };
+    // Le modèle de bras est déduit de l'image : un skin bras fins envoyé en « classic » s'affiche
+    // troué (colonne transparente, bandes noires sur les bras).
+    let variant = model::effective_variant(&bytes, variant);
     // Tout skin appliqué est gardé dans la garde-robe pour y revenir en un clic.
     remember(&bytes, variant)?;
 
@@ -271,17 +275,21 @@ fn write_pack(path: &Path, skin: &[u8]) -> AppResult<()> {
         br#"{"pack":{"pack_format":34,"description":"Skin Nexora Craft","supported_formats":{"min_inclusive":1,"max_inclusive":999},"min_format":1,"max_format":999}}"#,
     )?;
 
-    let mut targets: Vec<String> = vec![
-        "assets/minecraft/textures/entity/steve.png".into(),
-        "assets/minecraft/textures/entity/alex.png".into(),
+    // Minecraft choisit le skin par défaut (et donc bras larges ou fins) d'après l'UUID : chaque
+    // emplacement reçoit le skin converti au bon modèle, sinon un skin bras fins posé sur un
+    // modèle bras larges laisse un trou transparent dans le bras.
+    let (wide, slim) = model::both_models(skin);
+    let mut targets: Vec<(String, &[u8])> = vec![
+        ("assets/minecraft/textures/entity/steve.png".into(), &wide),
+        ("assets/minecraft/textures/entity/alex.png".into(), &slim),
     ];
     for name in DEFAULT_SKINS {
-        targets.push(format!("assets/minecraft/textures/entity/player/wide/{name}.png"));
-        targets.push(format!("assets/minecraft/textures/entity/player/slim/{name}.png"));
+        targets.push((format!("assets/minecraft/textures/entity/player/wide/{name}.png"), &wide));
+        targets.push((format!("assets/minecraft/textures/entity/player/slim/{name}.png"), &slim));
     }
-    for target in targets {
+    for (target, bytes) in targets {
         zip.start_file(target, opts).map_err(zip_err)?;
-        zip.write_all(skin)?;
+        zip.write_all(bytes)?;
     }
     zip.finish().map_err(zip_err)?;
     Ok(())

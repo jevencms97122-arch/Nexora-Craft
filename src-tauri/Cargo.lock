@@ -2624,6 +2624,7 @@ dependencies = [
  "keyring",
  "md-5",
  "open",
+ "png 0.17.16",
  "rand",
  "reqwest 0.12.28",
  "serde",
