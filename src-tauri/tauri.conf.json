@@ -45,7 +45,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../nexora-content/": "nexora-content/"
+      "../nexora-content/": "nexora-content/",
+      "../shield/": "shield/"
     },
     "createUpdaterArtifacts": true
   },

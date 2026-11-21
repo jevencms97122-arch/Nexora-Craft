@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
+import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { CommandPalette } from "./components/CommandPalette";
 import { CrashModal } from "./components/CrashModal";
 import { DropImport } from "./components/DropImport";
@@ -11,6 +11,7 @@ import { Toasts } from "./components/Toasts";
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { TitleBar } from "./components/TitleBar";
 import { PlayPage } from "./routes/PlayPage";
+import { SmpPage } from "./routes/SmpPage";
 
 // Les autres pages ne sont chargées qu'à la première visite : démarrage plus rapide, moins de mémoire.
 const InstancesPage = lazy(() => import("./routes/InstancesPage").then((m) => ({ default: m.InstancesPage })));
@@ -30,6 +31,7 @@ import { useThemeStore } from "./store/themeStore";
 
 function AppShell() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { image, refresh } = useBackgroundStore();
   const { theme, animated, sceneMode, weather, biome } = useThemeStore();
   const runningId = useGameStore((s) => s.runningId);
@@ -40,6 +42,12 @@ function AppShell() {
 
   useEffect(() => {
     trackLaunch();
+  }, []);
+
+  // Au démarrage, le launcher s'ouvre directement sur la page Nexora SMP.
+  useEffect(() => {
+    if (location.pathname === "/") navigate("/smp", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Les musiques viennent des fichiers du jeu : on relit la liste au démarrage, puis à chaque
@@ -94,7 +102,7 @@ function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location]);
 
-  const isPlay = displayed.pathname === "/";
+  const isPlay = displayed.pathname === "/" || displayed.pathname === "/smp";
 
   // Premier lancement : aucun compte et parcours jamais fait. Décidé une seule fois, au chargement
   // des comptes, pour que le parcours ne se ferme pas tout seul dès que le compte est créé.
@@ -150,7 +158,8 @@ function AppShell() {
         }}
       />
 
-      <Sidebar />
+      {/* Page Nexora SMP : aucun menu. Le menu classique n'apparaît que sur le launcher classique. */}
+      {displayed.pathname !== "/smp" && <Sidebar />}
       <div className="relative z-10 flex-1 flex flex-col min-w-0">
         <TitleBar />
         <main
@@ -160,6 +169,7 @@ function AppShell() {
           <Suspense fallback={null}>
           <Routes location={displayed}>
             <Route path="/" element={<PlayPage />} />
+            <Route path="/smp" element={<SmpPage />} />
             <Route path="/instances" element={<InstancesPage />} />
             <Route path="/instances/:instanceId" element={<InstanceDetailPage />} />
             <Route path="/content" element={<ContentPage />} />

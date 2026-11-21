@@ -183,6 +183,101 @@ pub fn build_args(
     full_args
 }
 
+
+/// Titre de la fenêtre de jeu d'un processus (Windows). Le titre de Minecraft vaut « Minecraft 1.21.11 »
+/// au menu, et « Minecraft 1.21.11 - Multijoueur (...) » dès qu'on est dans un monde : le « - » ne
+/// dépend donc pas de la langue.
+#[cfg(windows)]
+fn game_window(pid: u32) -> Option<(isize, String)> {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible};
+
+    struct Ctx {
+        pid: u32,
+        found: Option<(isize, String)>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &mut *(lparam.0 as *mut Ctx);
+        let mut owner = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut owner));
+        if owner == ctx.pid && IsWindowVisible(hwnd).as_bool() {
+            let mut buf = [0u16; 256];
+            let n = GetWindowTextW(hwnd, &mut buf);
+            if n > 0 {
+                let title = String::from_utf16_lossy(&buf[..n as usize]);
+                if title.starts_with("Minecraft") {
+                    ctx.found = Some((hwnd.0 as isize, title));
+                    return BOOL(0);
+                }
+            }
+        }
+        BOOL(1)
+    }
+    let mut ctx = Ctx { pid, found: None };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut ctx as *mut Ctx as isize));
+    }
+    ctx.found
+}
+
+/// Demande la fermeture normale de la fenêtre du jeu.
+#[cfg(windows)]
+fn close_window(hwnd: isize) {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    unsafe {
+        let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0));
+    }
+}
+
+
+/// Nexora Shield : analyse le PC avant de lancer l'instance du serveur officiel. Le jeu ne démarre
+/// pas si Shield n'est pas content (triche détectée, Shield absent ou refusé).
+#[cfg(windows)]
+async fn run_shield(app: &AppHandle, instance_dir: &Path) -> AppResult<()> {
+    use tauri::Manager;
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let shield_dir = PathBuf::from(&program_data).join("NexoraShield");
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("shield").join("NexoraShield.exe"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("shield").join("NexoraShield.exe"));
+        }
+    }
+    candidates.push(shield_dir.join("NexoraShield.exe"));
+    let Some(shield) = candidates.into_iter().find(|p| p.exists()) else {
+        return Err(AppError::Other("Nexora Shield est introuvable : réinstalle le launcher.".into()));
+    };
+
+    let status = Command::new(&shield)
+        .arg("--launcher")
+        .arg("--dir")
+        .arg(instance_dir)
+        .creation_flags(0x0800_0000) // pas de fenêtre console
+        .status()
+        .await
+        .map_err(|_| AppError::Other("Nexora Shield n'a pas pu démarrer.".into()))?;
+    let code = status.code().unwrap_or(1);
+    if code == 0 {
+        return Ok(());
+    }
+    let detail = std::fs::read_to_string(shield_dir.join("status.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(|m| m.to_string()))
+        .unwrap_or_default();
+    Err(AppError::Other(match code {
+        2 => format!("Triche détectée par Nexora Shield :\n{detail}\n\nFerme ou supprime-la pour pouvoir jouer."),
+        3 if !detail.is_empty() => detail,
+        3 => "Nexora Shield doit être autorisé : relance et clique sur « Oui » dans la fenêtre de Windows.".to_string(),
+        _ => "Nexora Shield ne répond pas. Redémarre ton PC puis réessaie.".to_string(),
+    }))
+}
+
 pub async fn launch(
     app: &AppHandle,
     java_path: &Path,
@@ -202,6 +297,11 @@ pub async fn launch(
     let full_args = build_args(instance, detail, client_jar, libs, account, server, &instance_dir, &natives_dir);
 
     std::fs::create_dir_all(&instance_dir)?;
+    // Nexora Shield protège uniquement l'instance du serveur officiel.
+    #[cfg(windows)]
+    if instance.name == "Nexora-SMP" {
+        run_shield(app, &instance_dir).await?;
+    }
     crate::skins::sync_offline_pack(&instance_dir, account)?;
 
     let mut child = Command::new(java_path)
@@ -246,11 +346,44 @@ pub async fn launch(
         }
     });
 
+    // Instance du serveur officiel : quand le joueur quitte le serveur (retour au menu), le jeu se ferme.
+    let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<()>();
+    #[cfg(windows)]
+    if server.is_some() && instance.name == "Nexora-SMP" {
+        if let Some(pid) = child.id() {
+            tokio::spawn(async move {
+                let mut was_in_world = false;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    let found = tokio::task::spawn_blocking(move || game_window(pid)).await.ok().flatten();
+                    let Some((hwnd, title)) = found else { continue };
+                    if title.contains(" - ") {
+                        was_in_world = true;
+                    } else if was_in_world {
+                        close_window(hwnd);
+                        // Si le jeu ne se ferme pas de lui-même, on l'arrête.
+                        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+                        let _ = kill_tx.send(());
+                        break;
+                    }
+                }
+            });
+        }
+    }
+    #[cfg(not(windows))]
+    drop(kill_tx);
+
     let app_exit = app.clone();
     let instance_id_exit = instance.id.clone();
     let started = std::time::Instant::now();
     tokio::spawn(async move {
-        let status = child.wait().await.ok();
+        let status = tokio::select! {
+            s = child.wait() => s.ok(),
+            Ok(()) = &mut kill_rx => {
+                let _ = child.kill().await;
+                child.wait().await.ok()
+            }
+        };
         let _ = crate::instances::add_playtime(&instance_id_exit, started.elapsed().as_secs());
         let _ = app_exit.emit(
             "game-exited",

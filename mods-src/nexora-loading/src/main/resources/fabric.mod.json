@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "nexoraloading",
+  "version": "${version}",
+  "name": "Nexora Loading",
+  "description": "Remplace les écrans de connexion et de chargement du terrain par l'écran de chargement Nexora SMP.",
+  "authors": ["Nexora"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": { "client": ["fr.nexora.loading.NexoraLoadingClient"] },
+  "mixins": ["nexoraloading.mixins.json"],
+  "depends": { "fabricloader": ">=0.18.0", "minecraft": "~1.21.11", "java": ">=21", "fabric-api": "*" }
+}

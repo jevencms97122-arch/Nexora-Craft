@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { api } from "../lib/api";
 import type { Instance, NewInstance } from "../lib/types";
 
+/// Instance réservée au serveur officiel : elle est lancée par la page Nexora SMP et n'apparaît nulle part ailleurs.
+const OFFICIAL_INSTANCE_NAME = "Nexora-SMP";
+
 interface InstanceState {
   instances: Instance[];
   loading: boolean;
@@ -20,7 +23,7 @@ export const useInstanceStore = create<InstanceState>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const instances = await api.listInstances();
+      const instances = (await api.listInstances()).filter((i) => i.name !== OFFICIAL_INSTANCE_NAME);
       set({ instances });
     } catch (e) {
       set({ error: String(e) });

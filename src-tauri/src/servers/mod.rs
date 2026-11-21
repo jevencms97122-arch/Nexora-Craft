@@ -290,26 +290,20 @@ async fn fetch_pack_code(client: &reqwest::Client) -> Option<String> {
     rows.into_iter().next().map(|r| r.code)
 }
 
-/// Retourne l'instance réservée au serveur officiel, en la créant au premier appel à partir du
-/// pack officiel (version, loader, mods, shaders). Si le pack a changé depuis, ou si une
-/// installation précédente était incomplète, l'instance existante est remise à niveau.
-pub async fn ensure_official_instance(app: &tauri::AppHandle, client: &reqwest::Client) -> AppResult<Instance> {
-    // Le pack vient de la base en ligne : le propriétaire du serveur y ajoute des mods sans
-    // publier de nouvelle version du launcher. Hors ligne, le pack intégré sert de repli.
-    let code = fetch_pack_code(client).await.unwrap_or_else(|| OFFICIAL_PACK_CODE.to_string());
-    let pack = crate::share::decode(&code).or_else(|_| crate::share::decode(OFFICIAL_PACK_CODE))?;
-    let code = if crate::share::decode(&code).is_ok() { code } else { OFFICIAL_PACK_CODE.to_string() };
+/// Mod d'écran de chargement Nexora, livré avec le launcher (dossier nexora-content/mods).
+const LOADING_MOD: &[u8] = include_bytes!("../../../nexora-content/mods/nexora-loading-1.0.0.jar");
+const LOADING_MOD_FILE: &str = "nexora-loading-1.0.0.jar";
+/// Fabric API (obligatoire pour le mod de chargement) : projet et version Modrinth pour 1.21.11.
+const FABRIC_API_PROJECT: &str = "P7dR8mSH";
+const FABRIC_API_VERSION: &str = "6qAuTtLR";
+
+/// Retourne l'instance réservée au serveur officiel, en la créant au premier appel : Fabric avec
+/// seulement Fabric API et le mod de chargement Nexora (aucun autre mod, aucun shader). Une instance
+/// créée avant avec le gros pack est nettoyée (ses mondes et réglages sont conservés).
+pub async fn ensure_official_instance(_app: &tauri::AppHandle, client: &reqwest::Client) -> AppResult<Instance> {
+    let pack = crate::share::decode(OFFICIAL_PACK_CODE)?;
     let saved = load_dedicated();
-    let old_pack = saved.as_ref().and_then(|d| d.pack_code.as_deref()).and_then(|c| crate::share::decode(c).ok());
-
     let existing = saved.as_ref().and_then(|d| instances::get(&d.instance_id).ok());
-    if let (Some(instance), Some(saved)) = (&existing, &saved) {
-        if saved.pack_code.as_deref() == Some(code.as_str()) {
-            return Ok(instance.clone());
-        }
-    }
-
-    // Création, ou remise à niveau de l'instance existante (ses mondes et réglages sont conservés).
     let mut instance = match existing {
         Some(instance) => instance,
         None => instances::create(NewInstance {
@@ -318,21 +312,41 @@ pub async fn ensure_official_instance(app: &tauri::AppHandle, client: &reqwest::
             loader: pack.loader.clone(),
         })?,
     };
-    instance.mc_version = pack.mc_version.clone();
-    instance.loader = pack.loader.clone();
-    instance.loader_version = pack.loader_version.clone();
-    let instance = instances::update(instance)?;
-
-    let mut record = Dedicated { instance_id: instance.id.clone(), pack_code: None };
-    fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
-
-    let result = crate::share::sync_items(app, client, instance, old_pack.as_ref(), &pack).await?;
-    // Le pack n'est noté comme installé que s'il l'est en entier : sinon on réessaiera.
-    if result.failed.is_empty() {
-        record.pack_code = Some(code);
-        fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
+    if instance.loader != pack.loader || instance.loader_version != pack.loader_version || instance.mc_version != pack.mc_version {
+        instance.loader = pack.loader.clone();
+        instance.loader_version = pack.loader_version.clone();
+        instance.mc_version = pack.mc_version.clone();
+        instance = instances::update(instance)?;
     }
-    Ok(result.instance)
+
+    // Retire tout contenu installé autrefois, sauf Fabric API.
+    let installed = crate::content::list_installed(&instance.id)?;
+    for item in &installed {
+        if item.project_id != FABRIC_API_PROJECT {
+            let _ = crate::content::remove(&instance.id, &item.project_id);
+        }
+    }
+    if !installed.iter().any(|i| i.project_id == FABRIC_API_PROJECT && i.version_id == FABRIC_API_VERSION) {
+        crate::content::install_version(
+            client,
+            &instance.id,
+            FABRIC_API_PROJECT,
+            FABRIC_API_VERSION,
+            "Fabric API",
+            None,
+            crate::content::ContentType::Mod,
+        )
+        .await?;
+    }
+
+    // Le mod de chargement Nexora est copié à chaque lancement (toujours la version du launcher).
+    let mods_dir = paths::instance_dir(&instance.id).join("mods");
+    fs::create_dir_all(&mods_dir)?;
+    fs::write(mods_dir.join(LOADING_MOD_FILE), LOADING_MOD)?;
+
+    let record = Dedicated { instance_id: instance.id.clone(), pack_code: None };
+    fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
+    Ok(instance)
 }
 
 #[cfg(test)]

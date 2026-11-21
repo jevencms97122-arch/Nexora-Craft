@@ -46,6 +46,7 @@ rand = "0.8"
 dirs = "5"
 zip-extract = "0.2"
 urlencoding = "2"
+png = "0.17"
 
 [target.'cfg(windows)'.dependencies]
 # Coffre d'identifiants de Windows : la clé secrète de « Jouer ensemble » n'est plus écrite en clair.
@@ -60,6 +61,7 @@ windows = { version = "0.61", features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Variant",
   "Win32_UI_Shell_PropertiesSystem",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 
 
