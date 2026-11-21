@@ -304,12 +304,19 @@ pub async fn launch(
     }
     crate::skins::sync_offline_pack(&instance_dir, account)?;
 
-    let mut child = Command::new(java_path)
+    let mut command = Command::new(java_path);
+    command
         .args(&full_args)
         .current_dir(&instance_dir)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
+        .stderr(std::process::Stdio::piped());
+    // Pas de fenêtre console (CREATE_NO_WINDOW) : sinon Windows lance un hôte de console
+    // (OpenConsole.exe avec Windows Terminal, conhost.exe sinon) qui garde un accès au processus du
+    // jeu, et Nexora Shield le prend pour un programme de triche. Les journaux restent lus par les
+    // tubes stdout/stderr ci-dessus.
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let mut child = command.spawn()?;
 
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
