@@ -1,6 +1,6 @@
 [package]
 name = "nexora-craft"
-version = "0.2.2"
+version = "0.2.3"
 description = "Nexora Craft - Minecraft Launcher"
 authors = ["Nexora Craft"]
 edition = "2021"
@@ -66,7 +66,9 @@ windows = { version = "0.61", features = [
 
 
 [profile.release]
-# Binaire plus petit et plus rapide à démarrer ; utile sur les PC modestes.
-lto = "thin"
-codegen-units = 4
+# Optimisation maximale : binaire plus petit et plus rapide, utile sur les PC modestes (la
+# compilation de la release est plus longue).
+opt-level = 3
+lto = "fat"
+codegen-units = 1
 strip = true

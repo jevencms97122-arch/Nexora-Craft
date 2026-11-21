@@ -37,13 +37,42 @@ interface GameState {
 }
 
 let listenersReady = false;
+/// Lignes de journal gardées pour l'affichage et l'analyse des plantages.
+const MAX_LOGS = 500;
+/// Intervalle de mise à jour de l'interface pendant les téléchargements et le jeu.
+const FLUSH_MS = 200;
 
 function ensureListeners(set: (partial: Partial<GameState>) => void, get: () => GameState) {
   if (listenersReady) return;
   listenersReady = true;
 
+  // Les téléchargements envoient un message par fichier (des milliers pour Minecraft) et le jeu une
+  // ligne de journal à la fois : on les regroupe et l'interface n'est mise à jour que quelques fois
+  // par seconde, au lieu de se redessiner à chaque message.
+  let pendingProgress: DownloadProgress | null = null;
+  let pendingLogs: GameLogLine[] = [];
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    flushTimer = null;
+    const partial: Partial<GameState> = {};
+    if (pendingProgress) {
+      partial.progress = pendingProgress;
+      pendingProgress = null;
+    }
+    if (pendingLogs.length > 0) {
+      partial.logs = [...get().logs, ...pendingLogs].slice(-MAX_LOGS);
+      partial.runningId = pendingLogs[pendingLogs.length - 1].instance_id;
+      pendingLogs = [];
+    }
+    if (Object.keys(partial).length > 0) set(partial);
+  };
+  const scheduleFlush = () => {
+    if (!flushTimer) flushTimer = setTimeout(flush, FLUSH_MS);
+  };
+
   listen<DownloadProgress>("download-progress", (event) => {
-    set({ progress: event.payload });
+    pendingProgress = event.payload;
+    scheduleFlush();
   });
 
   listen<ImportProgress>("share-progress", (event) => {
@@ -51,11 +80,15 @@ function ensureListeners(set: (partial: Partial<GameState>) => void, get: () => 
   });
 
   listen<GameLogLine>("game-log", (event) => {
-    const logs = [...get().logs, event.payload].slice(-500);
-    set({ logs, runningId: event.payload.instance_id });
+    pendingLogs.push(event.payload);
+    if (pendingLogs.length > MAX_LOGS) pendingLogs = pendingLogs.slice(-MAX_LOGS);
+    scheduleFlush();
   });
 
   listen<GameExited>("game-exited", (event) => {
+    // Les dernières lignes du journal servent à l'analyse d'un plantage : on les applique d'abord.
+    if (flushTimer) clearTimeout(flushTimer);
+    flush();
     const code = event.payload.code;
     // Code 0 : fermeture normale. Tout autre code est traité comme un plantage et analysé.
     const crash = code !== 0 ? analyzeLogs(get().logs, code) : null;

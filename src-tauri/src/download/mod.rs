@@ -102,25 +102,39 @@ pub async fn download_all(
         return Ok(());
     }
     let completed = std::sync::atomic::AtomicUsize::new(0);
+    // Un message de progression par fichier ferait des milliers de messages (assets de Minecraft) :
+    // au plus un toutes les 100 ms, plus le dernier.
+    let last_emit = std::sync::Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1));
 
     let results: Vec<AppResult<()>> = stream::iter(tasks.into_iter().map(|task| {
         let client = client.clone();
         let app = app.clone();
         let completed = &completed;
+        let last_emit = &last_emit;
         let instance_id = instance_id.to_string();
         let stage = stage.to_string();
         async move {
             let result = download_one(&client, &task).await;
             let done = completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-            let _ = app.emit(
-                "download-progress",
-                DownloadProgress {
-                    instance_id,
-                    stage,
-                    completed: done,
-                    total,
-                },
-            );
+            let due = {
+                let mut last = last_emit.lock().unwrap_or_else(|e| e.into_inner());
+                let due = done == total || last.elapsed() >= std::time::Duration::from_millis(100);
+                if due {
+                    *last = std::time::Instant::now();
+                }
+                due
+            };
+            if due {
+                let _ = app.emit(
+                    "download-progress",
+                    DownloadProgress {
+                        instance_id,
+                        stage,
+                        completed: done,
+                        total,
+                    },
+                );
+            }
             result
         }
     }))

@@ -19,7 +19,7 @@ use crate::state::AppState;
 // ---------- Instances ----------
 
 #[tauri::command]
-pub fn list_instances() -> AppResult<Vec<Instance>> {
+pub async fn list_instances() -> AppResult<Vec<Instance>> {
     instances::list()
 }
 
@@ -63,12 +63,12 @@ fn loader_kind_for(loader: &Loader) -> Option<LoaderKind> {
 }
 
 #[tauri::command]
-pub fn update_instance(instance: Instance) -> AppResult<Instance> {
+pub async fn update_instance(instance: Instance) -> AppResult<Instance> {
     instances::update(instance)
 }
 
 #[tauri::command]
-pub fn delete_instance(id: String) -> AppResult<()> {
+pub async fn delete_instance(id: String) -> AppResult<()> {
     instances::delete(&id)
 }
 
@@ -116,19 +116,19 @@ pub async fn change_instance_version(
 }
 
 #[tauri::command]
-pub fn open_instance_folder(instance_id: String, sub: Option<String>) -> AppResult<()> {
+pub async fn open_instance_folder(instance_id: String, sub: Option<String>) -> AppResult<()> {
     instances::open_folder(&instance_id, sub.as_deref())
 }
 
 // ---------- Sauvegardes de mondes ----------
 
 #[tauri::command]
-pub fn list_worlds(instance_id: String) -> AppResult<Vec<crate::backups::World>> {
+pub async fn list_worlds(instance_id: String) -> AppResult<Vec<crate::backups::World>> {
     crate::backups::list_worlds(&instance_id)
 }
 
 #[tauri::command]
-pub fn list_backups(instance_id: String) -> AppResult<Vec<crate::backups::Backup>> {
+pub async fn list_backups(instance_id: String) -> AppResult<Vec<crate::backups::Backup>> {
     crate::backups::list_backups(&instance_id)
 }
 
@@ -147,7 +147,7 @@ pub async fn restore_backup(instance_id: String, file_name: String) -> AppResult
 }
 
 #[tauri::command]
-pub fn delete_backup(instance_id: String, file_name: String) -> AppResult<()> {
+pub async fn delete_backup(instance_id: String, file_name: String) -> AppResult<()> {
     crate::backups::delete(&instance_id, &file_name)
 }
 
@@ -171,7 +171,7 @@ pub async fn export_instance_mrpack(
 
 /// Mémoire vive totale du PC, en Mo, pour conseiller une quantité de RAM au jeu.
 #[tauri::command]
-pub fn system_memory_mb() -> Option<u64> {
+pub async fn system_memory_mb() -> Option<u64> {
     crate::system::total_memory_mb()
 }
 
@@ -185,17 +185,17 @@ pub async fn list_mc_versions(state: State<'_, AppState>) -> AppResult<minecraft
 // ---------- Comptes / Auth ----------
 
 #[tauri::command]
-pub fn list_accounts() -> AppResult<AccountsFile> {
+pub async fn list_accounts() -> AppResult<AccountsFile> {
     accounts::list()
 }
 
 #[tauri::command]
-pub fn set_active_account(uuid: String) -> AppResult<AccountsFile> {
+pub async fn set_active_account(uuid: String) -> AppResult<AccountsFile> {
     accounts::set_active(&uuid)
 }
 
 #[tauri::command]
-pub fn remove_account(uuid: String) -> AppResult<AccountsFile> {
+pub async fn remove_account(uuid: String) -> AppResult<AccountsFile> {
     accounts::remove(&uuid)
 }
 
@@ -207,7 +207,7 @@ pub async fn login_microsoft(state: State<'_, AppState>) -> AppResult<Account> {
 }
 
 #[tauri::command]
-pub fn create_offline_account(username: String) -> AppResult<Account> {
+pub async fn create_offline_account(username: String) -> AppResult<Account> {
     accounts::create_offline(&username)
 }
 
@@ -252,19 +252,19 @@ pub async fn apply_remote_skin(state: State<'_, AppState>, url: String, variant:
 }
 
 #[tauri::command]
-pub fn get_local_skin(uuid: String) -> AppResult<Option<String>> {
+pub async fn get_local_skin(uuid: String) -> AppResult<Option<String>> {
     skins::local_skin_data_uri(&uuid)
 }
 
 // ---------- Paramètres ----------
 
 #[tauri::command]
-pub fn get_settings() -> AppResult<Settings> {
+pub async fn get_settings() -> AppResult<Settings> {
     settings::load()
 }
 
 #[tauri::command]
-pub fn save_settings(settings: Settings) -> AppResult<()> {
+pub async fn save_settings(settings: Settings) -> AppResult<()> {
     let old = settings::load().unwrap_or_default();
     settings::save(&settings)?;
     // La mémoire par défaut s'applique aussi aux instances qui n'ont pas été réglées à la main.
@@ -276,7 +276,7 @@ pub fn save_settings(settings: Settings) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn set_background_image(path: String) -> AppResult<String> {
+pub async fn set_background_image(path: String) -> AppResult<String> {
     let bytes = std::fs::read(&path)?;
     let mime = match std::path::Path::new(&path)
         .extension()
@@ -300,7 +300,7 @@ pub fn set_background_image(path: String) -> AppResult<String> {
 }
 
 #[tauri::command]
-pub fn clear_background_image() -> AppResult<()> {
+pub async fn clear_background_image() -> AppResult<()> {
     let mut cfg = settings::load()?;
     cfg.background_image = None;
     settings::save(&cfg)
@@ -433,7 +433,7 @@ pub async fn search_modrinth(
 }
 
 #[tauri::command]
-pub fn list_installed_content(instance_id: String) -> AppResult<Vec<InstalledContent>> {
+pub async fn list_installed_content(instance_id: String) -> AppResult<Vec<InstalledContent>> {
     content::list_installed(&instance_id)
 }
 
@@ -486,12 +486,12 @@ pub async fn install_modpack(
 // ---------- Favoris ----------
 
 #[tauri::command]
-pub fn list_favorites() -> AppResult<Vec<Favorite>> {
+pub async fn list_favorites() -> AppResult<Vec<Favorite>> {
     favorites::list()
 }
 
 #[tauri::command]
-pub fn add_favorite(
+pub async fn add_favorite(
     project_id: String,
     title: String,
     icon_url: Option<String>,
@@ -506,7 +506,7 @@ pub fn add_favorite(
 }
 
 #[tauri::command]
-pub fn remove_favorite(project_id: String) -> AppResult<Vec<Favorite>> {
+pub async fn remove_favorite(project_id: String) -> AppResult<Vec<Favorite>> {
     favorites::remove(&project_id)
 }
 
@@ -522,7 +522,7 @@ pub async fn start_together(app: AppHandle, state: State<'_, AppState>) -> AppRe
 }
 
 #[tauri::command]
-pub fn stop_together(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn stop_together(state: State<'_, AppState>) -> AppResult<()> {
     crate::together::stop(&state)
 }
 
@@ -532,14 +532,14 @@ pub fn is_together_running(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-pub fn save_together_port(port: u16) -> AppResult<()> {
+pub async fn save_together_port(port: u16) -> AppResult<()> {
     let mut cfg = settings::load()?;
     cfg.together_port = port;
     settings::save(&cfg)
 }
 
 #[tauri::command]
-pub fn remove_content(instance_id: String, project_id: String) -> AppResult<()> {
+pub async fn remove_content(instance_id: String, project_id: String) -> AppResult<()> {
     content::remove(&instance_id, &project_id)
 }
 
@@ -560,29 +560,29 @@ pub async fn update_content(
 }
 
 #[tauri::command]
-pub fn set_content_enabled(instance_id: String, project_id: String, enabled: bool) -> AppResult<Vec<InstalledContent>> {
+pub async fn set_content_enabled(instance_id: String, project_id: String, enabled: bool) -> AppResult<Vec<InstalledContent>> {
     content::set_enabled(&instance_id, &project_id, enabled)
 }
 
 // ---------- Serveurs ----------
 
 #[tauri::command]
-pub fn list_servers() -> AppResult<Vec<Server>> {
+pub async fn list_servers() -> AppResult<Vec<Server>> {
     servers::list()
 }
 
 #[tauri::command]
-pub fn add_server(name: String, address: String) -> AppResult<Vec<Server>> {
+pub async fn add_server(name: String, address: String) -> AppResult<Vec<Server>> {
     servers::add(&name, &address)
 }
 
 #[tauri::command]
-pub fn remove_server(id: String) -> AppResult<Vec<Server>> {
+pub async fn remove_server(id: String) -> AppResult<Vec<Server>> {
     servers::remove(&id)
 }
 
 #[tauri::command]
-pub fn set_server_instance(id: String, instance_id: Option<String>) -> AppResult<Vec<Server>> {
+pub async fn set_server_instance(id: String, instance_id: Option<String>) -> AppResult<Vec<Server>> {
     servers::set_instance(&id, instance_id)
 }
 
@@ -594,34 +594,34 @@ pub async fn ping_server(address: String) -> AppResult<ServerStatus> {
 // ---------- Captures d'écran ----------
 
 #[tauri::command]
-pub fn list_screenshots() -> AppResult<Vec<Screenshot>> {
+pub async fn list_screenshots() -> AppResult<Vec<Screenshot>> {
     screenshots::list()
 }
 
 #[tauri::command]
-pub fn delete_screenshot(path: String) -> AppResult<()> {
+pub async fn delete_screenshot(path: String) -> AppResult<()> {
     screenshots::delete(&path)
 }
 
 #[tauri::command]
-pub fn open_screenshot(path: String) -> AppResult<()> {
+pub async fn open_screenshot(path: String) -> AppResult<()> {
     screenshots::open(&path)
 }
 
 #[tauri::command]
-pub fn open_screenshots_folder(instance_id: String) -> AppResult<()> {
+pub async fn open_screenshots_folder(instance_id: String) -> AppResult<()> {
     screenshots::open_folder(&instance_id)
 }
 
 // ---------- Partage d'instance par code ----------
 
 #[tauri::command]
-pub fn export_instance_code(instance_id: String) -> AppResult<String> {
+pub async fn export_instance_code(instance_id: String) -> AppResult<String> {
     share::export(&instance_id)
 }
 
 #[tauri::command]
-pub fn preview_instance_code(code: String) -> AppResult<SharedInstance> {
+pub async fn preview_instance_code(code: String) -> AppResult<SharedInstance> {
     share::decode(&code)
 }
 
@@ -661,17 +661,17 @@ pub async fn other_media_playing() -> bool {
 // ---------- Session du compte Nexora ----------
 
 #[tauri::command]
-pub fn session_get(key: String) -> Option<String> {
+pub async fn session_get(key: String) -> Option<String> {
     crate::session::get(&key)
 }
 
 #[tauri::command]
-pub fn session_set(key: String, value: String) -> AppResult<()> {
+pub async fn session_set(key: String, value: String) -> AppResult<()> {
     crate::session::set(&key, &value)
 }
 
 #[tauri::command]
-pub fn session_remove(key: String) -> AppResult<()> {
+pub async fn session_remove(key: String) -> AppResult<()> {
     crate::session::remove(&key)
 }
 
@@ -713,13 +713,13 @@ pub async fn open_curseforge(app: AppHandle) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn scan_downloads(since_ms: u64) -> AppResult<Vec<crate::imports::DownloadedFile>> {
+pub async fn scan_downloads(since_ms: u64) -> AppResult<Vec<crate::imports::DownloadedFile>> {
     crate::imports::scan(since_ms)
 }
 
 /// Analyse un fichier téléchargé, et ramène le launcher au premier plan pour poser la question.
 #[tauri::command]
-pub fn inspect_download(app: AppHandle, path: String) -> AppResult<crate::imports::FileInfo> {
+pub async fn inspect_download(app: AppHandle, path: String) -> AppResult<crate::imports::FileInfo> {
     use tauri::Manager;
     let info = crate::imports::inspect(&path)?;
     if let Some(window) = app.get_webview_window("main") {
@@ -732,34 +732,34 @@ pub fn inspect_download(app: AppHandle, path: String) -> AppResult<crate::import
 
 /// Les fichiers récents de Téléchargements, à proposer à l'import.
 #[tauri::command]
-pub fn recent_downloads() -> AppResult<Vec<crate::imports::DownloadedFile>> {
+pub async fn recent_downloads() -> AppResult<Vec<crate::imports::DownloadedFile>> {
     crate::imports::recent(12)
 }
 
 /// Contenu fourni par Nexora (dossier `nexora-content/`), avec sa compatibilité par instance.
 #[tauri::command]
-pub fn list_nexora_content(app: AppHandle) -> AppResult<Vec<crate::imports::FileInfo>> {
+pub async fn list_nexora_content(app: AppHandle) -> AppResult<Vec<crate::imports::FileInfo>> {
     crate::imports::nexora_content(&app)
 }
 
 /// Analyse un fichier choisi par le joueur (sélecteur ou glisser-déposer).
 #[tauri::command]
-pub fn inspect_picked(path: String) -> AppResult<crate::imports::FileInfo> {
+pub async fn inspect_picked(path: String) -> AppResult<crate::imports::FileInfo> {
     crate::imports::inspect_picked(&path)
 }
 
 #[tauri::command]
-pub fn install_picked(path: String, instance_id: String) -> AppResult<InstalledContent> {
+pub async fn install_picked(path: String, instance_id: String) -> AppResult<InstalledContent> {
     crate::imports::install_picked(&path, &instance_id)
 }
 
 #[tauri::command]
-pub fn install_download(path: String, instance_id: String) -> AppResult<InstalledContent> {
+pub async fn install_download(path: String, instance_id: String) -> AppResult<InstalledContent> {
     crate::imports::install(&path, &instance_id)
 }
 
 #[tauri::command]
-pub fn list_game_music() -> AppResult<Vec<crate::music::GameTrack>> {
+pub async fn list_game_music() -> AppResult<Vec<crate::music::GameTrack>> {
     crate::music::list()
 }
 
@@ -782,28 +782,28 @@ pub async fn download_nexora_song(
 }
 
 #[tauri::command]
-pub fn remove_nexora_song(id: String) -> AppResult<()> {
+pub async fn remove_nexora_song(id: String) -> AppResult<()> {
     crate::nexora_music::remove(&id)
 }
 
 /// Les morceaux déjà téléchargés.
 #[tauri::command]
-pub fn list_nexora_songs() -> Vec<crate::nexora_music::LocalSong> {
+pub async fn list_nexora_songs() -> Vec<crate::nexora_music::LocalSong> {
     crate::nexora_music::list_local()
 }
 
 #[tauri::command]
-pub fn set_nexora_songs_enabled(ids: Vec<String>, enabled: bool) -> AppResult<()> {
+pub async fn set_nexora_songs_enabled(ids: Vec<String>, enabled: bool) -> AppResult<()> {
     crate::nexora_music::set_enabled(&ids, enabled)
 }
 
 #[tauri::command]
-pub fn list_wardrobe() -> AppResult<Vec<WardrobeSkin>> {
+pub async fn list_wardrobe() -> AppResult<Vec<WardrobeSkin>> {
     skins::list_wardrobe()
 }
 
 #[tauri::command]
-pub fn remove_wardrobe_skin(id: String) -> AppResult<()> {
+pub async fn remove_wardrobe_skin(id: String) -> AppResult<()> {
     skins::remove_from_wardrobe(&id)
 }
 
@@ -837,7 +837,7 @@ pub async fn analyze_crash_with_ai(
 
 /// Icône ou bannière personnalisée d'une instance ; `path` absent retire l'image.
 #[tauri::command]
-pub fn set_instance_image(
+pub async fn set_instance_image(
     instance_id: String,
     kind: instances::ImageKind,
     path: Option<String>,
