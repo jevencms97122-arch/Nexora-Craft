@@ -299,7 +299,7 @@ pub async fn launch(
     std::fs::create_dir_all(&instance_dir)?;
     // Nexora Shield protège uniquement l'instance du serveur officiel.
     #[cfg(windows)]
-    if instance.name == "Nexora-SMP" {
+    if crate::servers::is_official_instance_name(&instance.name) {
         run_shield(app, &instance_dir).await?;
     }
     crate::skins::sync_offline_pack(&instance_dir, account)?;
@@ -356,7 +356,7 @@ pub async fn launch(
     // Instance du serveur officiel : quand le joueur quitte le serveur (retour au menu), le jeu se ferme.
     let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<()>();
     #[cfg(windows)]
-    if server.is_some() && instance.name == "Nexora-SMP" {
+    if server.is_some() && crate::servers::is_official_instance_name(&instance.name) {
         if let Some(pid) = child.id() {
             tokio::spawn(async move {
                 let mut was_in_world = false;

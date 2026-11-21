@@ -3,11 +3,22 @@ import { Link } from "react-router-dom";
 import { AccountSkin3D } from "../components/AccountSkin";
 import { Dropdown, Icon, ProgressBar, Spinner, progressPercent } from "../components/ui";
 import { api } from "../lib/api";
-import type { Server, ServerStatus } from "../lib/types";
+import type { Renderer, Server, ServerStatus } from "../lib/types";
 import { useAccountStore } from "../store/accountStore";
 import { useGameStore } from "../store/gameStore";
 
 const REFRESH_MS = 30_000;
+/// Dernier rendu choisi (OpenGL ou Vulkan), gardé d'une ouverture du launcher à l'autre.
+const RENDERER_KEY = "nexora.smp.renderer";
+
+const RENDERERS: { value: Renderer; label: string; hint: string }[] = [
+  { value: "opengl", label: "OpenGL", hint: "Rendu classique de Minecraft, le plus compatible" },
+  { value: "vulkan", label: "Vulkan", hint: "VulkanMod : souvent plus de FPS, carte graphique compatible Vulkan requise" },
+];
+
+function savedRenderer(): Renderer {
+  return localStorage.getItem(RENDERER_KEY) === "vulkan" ? "vulkan" : "opengl";
+}
 
 /// Page « Nexora SMP » : le serveur officiel, un seul bouton Jouer qui installe ce qu'il faut puis
 /// rejoint directement le serveur. Le sélecteur du bas ne contient que Nexora SMP.
@@ -16,6 +27,12 @@ export function SmpPage() {
   const { joinOfficial, preparingOfficial, officialProgress, launchingId, runningId, progress, error } = useGameStore();
   const [server, setServer] = useState<Server | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const [renderer, setRenderer] = useState<Renderer>(savedRenderer);
+
+  function chooseRenderer(value: Renderer) {
+    setRenderer(value);
+    localStorage.setItem(RENDERER_KEY, value);
+  }
 
   useEffect(() => {
     api
@@ -102,7 +119,7 @@ export function SmpPage() {
                   }
                 />
                 <button
-                  onClick={() => server && joinOfficial(server.address)}
+                  onClick={() => server && joinOfficial(server.address, renderer)}
                   disabled={!server || isLaunching || isRunning}
                   className="btn btn-primary btn-shine h-14 px-9 rounded-2xl text-base font-extrabold tracking-wider uppercase disabled:opacity-100 disabled:cursor-default"
                 >
@@ -120,6 +137,27 @@ export function SmpPage() {
                     </>
                   )}
                 </button>
+              </div>
+              {/* Rendu du jeu : chaque choix lance sa propre instance (OpenGL ou Vulkan). */}
+              <div className="flex items-center gap-3 px-2">
+                <span className="text-xs text-text-muted">Rendu</span>
+                <div className="flex rounded-xl bg-panel-2 border border-border-strong p-1" role="radiogroup" aria-label="Rendu du jeu">
+                  {RENDERERS.map((r) => (
+                    <button
+                      key={r.value}
+                      role="radio"
+                      aria-checked={renderer === r.value}
+                      title={r.hint}
+                      onClick={() => chooseRenderer(r.value)}
+                      disabled={isLaunching || isRunning}
+                      className={`px-3 h-7 rounded-lg text-xs font-semibold transition-colors disabled:cursor-default ${
+                        renderer === r.value ? "bg-accent text-accent-ink" : "text-text-muted hover:text-text"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               {isLaunching && (
                 <div className="px-2 pb-1 flex flex-col gap-2">

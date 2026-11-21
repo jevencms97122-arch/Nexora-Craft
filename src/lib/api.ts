@@ -28,6 +28,7 @@ import type {
   NewInstance,
   ProjectVersion,
   RemoteSkin,
+  Renderer,
   Settings,
   SkinPage,
   VersionManifest,
@@ -190,7 +191,8 @@ export const api = {
   setServerInstance: (id: string, instanceId: string | null) =>
     invoke<Server[]>("set_server_instance", { id, instanceId }),
   /// Instance réservée au serveur officiel, créée à la bonne version au premier appel.
-  ensureOfficialInstance: () => invoke<Instance>("ensure_official_instance"),
+  /// Instance du serveur officiel pour ce rendu (OpenGL par défaut, ou Vulkan avec VulkanMod).
+  ensureOfficialInstance: (renderer: Renderer = "opengl") => invoke<Instance>("ensure_official_instance", { renderer }),
   pingServer: (address: string) => invoke<ServerStatus>("ping_server", { address }),
 
   listScreenshots: () => invoke<Screenshot[]>("list_screenshots"),

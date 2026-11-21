@@ -18,6 +18,44 @@ const PING_TIMEOUT: Duration = Duration::from_secs(4);
 /// Serveur officiel du launcher : toujours présent en tête de liste, impossible à retirer.
 const OFFICIAL_ID: &str = "nexora-smp";
 const OFFICIAL_NAME: &str = "Nexora-SMP";
+/// Instance du serveur officiel avec le rendu Vulkan (VulkanMod) au lieu d'OpenGL.
+const OFFICIAL_VULKAN_NAME: &str = "Nexora-SMP Vulkan";
+
+/// Rendu du jeu pour le serveur officiel : chaque rendu a sa propre instance (mêmes réglages de
+/// départ, mods différents), pour passer de l'un à l'autre sans rien réinstaller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Renderer {
+    OpenGl,
+    Vulkan,
+}
+
+impl Renderer {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("vulkan") => Renderer::Vulkan,
+            _ => Renderer::OpenGl,
+        }
+    }
+
+    fn instance_name(self) -> &'static str {
+        match self {
+            Renderer::OpenGl => OFFICIAL_NAME,
+            Renderer::Vulkan => OFFICIAL_VULKAN_NAME,
+        }
+    }
+
+    fn record_file(self) -> std::path::PathBuf {
+        match self {
+            Renderer::OpenGl => paths::app_data_dir().join("official-instance.json"),
+            Renderer::Vulkan => paths::app_data_dir().join("official-instance-vulkan.json"),
+        }
+    }
+}
+
+/// Instance réservée au serveur officiel (OpenGL ou Vulkan), d'après son nom.
+pub fn is_official_instance_name(name: &str) -> bool {
+    name == OFFICIAL_NAME || name == OFFICIAL_VULKAN_NAME
+}
 const OFFICIAL_ADDRESS: &str = "game06-dc02.ouiheberg.com:8756";
 /// Pack officiel du serveur, sous forme de code de partage (version, loader, mods et shaders).
 /// L'instance « Nexora-SMP » est créée à partir de lui. Pour publier un nouveau pack : génère un
@@ -249,10 +287,6 @@ pub async fn ping(address: &str) -> ServerStatus {
 
 // ---------- Instance dédiée au serveur officiel ----------
 
-fn dedicated_file() -> std::path::PathBuf {
-    paths::app_data_dir().join("official-instance.json")
-}
-
 /// Ce que le launcher retient de l'instance dédiée : laquelle, et quel pack y est installé.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Dedicated {
@@ -262,8 +296,8 @@ struct Dedicated {
     pack_code: Option<String>,
 }
 
-fn load_dedicated() -> Option<Dedicated> {
-    let data = fs::read_to_string(dedicated_file()).ok()?;
+fn load_dedicated(renderer: Renderer) -> Option<Dedicated> {
+    let data = fs::read_to_string(renderer.record_file()).ok()?;
     // Ancien format : l'identifiant seul, du temps où l'instance était en vanilla.
     serde_json::from_str::<Dedicated>(&data).ok().or_else(|| {
         serde_json::from_str::<String>(&data).ok().map(|instance_id| Dedicated { instance_id, pack_code: None })
@@ -296,18 +330,26 @@ const LOADING_MOD_FILE: &str = "nexora-loading-1.0.0.jar";
 /// Fabric API (obligatoire pour le mod de chargement) : projet et version Modrinth pour 1.21.11.
 const FABRIC_API_PROJECT: &str = "P7dR8mSH";
 const FABRIC_API_VERSION: &str = "6qAuTtLR";
+/// VulkanMod (rendu Vulkan) : projet et version Modrinth pour Fabric 1.21.11.
+const VULKANMOD_PROJECT: &str = "JYQhtZtO";
+const VULKANMOD_VERSION: &str = "hWKRTXbQ";
 
-/// Retourne l'instance réservée au serveur officiel, en la créant au premier appel : Fabric avec
-/// seulement Fabric API et le mod de chargement Nexora (aucun autre mod, aucun shader). Une instance
-/// créée avant avec le gros pack est nettoyée (ses mondes et réglages sont conservés).
-pub async fn ensure_official_instance(_app: &tauri::AppHandle, client: &reqwest::Client) -> AppResult<Instance> {
+/// Retourne l'instance réservée au serveur officiel pour ce rendu, en la créant au premier appel :
+/// Fabric avec seulement Fabric API et le mod de chargement Nexora (plus VulkanMod pour le rendu
+/// Vulkan), aucun autre mod ni shader. Une instance créée avant avec le gros pack est nettoyée (ses
+/// mondes et réglages sont conservés).
+pub async fn ensure_official_instance(
+    _app: &tauri::AppHandle,
+    client: &reqwest::Client,
+    renderer: Renderer,
+) -> AppResult<Instance> {
     let pack = crate::share::decode(OFFICIAL_PACK_CODE)?;
-    let saved = load_dedicated();
+    let saved = load_dedicated(renderer);
     let existing = saved.as_ref().and_then(|d| instances::get(&d.instance_id).ok());
     let mut instance = match existing {
         Some(instance) => instance,
         None => instances::create(NewInstance {
-            name: OFFICIAL_NAME.to_string(),
+            name: renderer.instance_name().to_string(),
             mc_version: pack.mc_version.clone(),
             loader: pack.loader.clone(),
         })?,
@@ -319,24 +361,31 @@ pub async fn ensure_official_instance(_app: &tauri::AppHandle, client: &reqwest:
         instance = instances::update(instance)?;
     }
 
-    // Retire tout contenu installé autrefois, sauf Fabric API.
+    // Mods voulus pour ce rendu ; tout autre contenu installé autrefois est retiré.
+    let mut wanted = vec![(FABRIC_API_PROJECT, FABRIC_API_VERSION, "Fabric API")];
+    if renderer == Renderer::Vulkan {
+        wanted.push((VULKANMOD_PROJECT, VULKANMOD_VERSION, "VulkanMod"));
+    }
     let installed = crate::content::list_installed(&instance.id)?;
     for item in &installed {
-        if item.project_id != FABRIC_API_PROJECT {
+        let keep = wanted.iter().any(|(project, version, _)| item.project_id == *project && item.version_id == *version);
+        if !keep {
             let _ = crate::content::remove(&instance.id, &item.project_id);
         }
     }
-    if !installed.iter().any(|i| i.project_id == FABRIC_API_PROJECT && i.version_id == FABRIC_API_VERSION) {
-        crate::content::install_version(
-            client,
-            &instance.id,
-            FABRIC_API_PROJECT,
-            FABRIC_API_VERSION,
-            "Fabric API",
-            None,
-            crate::content::ContentType::Mod,
-        )
-        .await?;
+    for (project, version, title) in &wanted {
+        if !installed.iter().any(|i| i.project_id == *project && i.version_id == *version) {
+            crate::content::install_version(
+                client,
+                &instance.id,
+                project,
+                version,
+                title,
+                None,
+                crate::content::ContentType::Mod,
+            )
+            .await?;
+        }
     }
 
     // Le mod de chargement Nexora est copié à chaque lancement (toujours la version du launcher).
@@ -345,7 +394,7 @@ pub async fn ensure_official_instance(_app: &tauri::AppHandle, client: &reqwest:
     fs::write(mods_dir.join(LOADING_MOD_FILE), LOADING_MOD)?;
 
     let record = Dedicated { instance_id: instance.id.clone(), pack_code: None };
-    fs::write(dedicated_file(), serde_json::to_string(&record)?)?;
+    fs::write(renderer.record_file(), serde_json::to_string(&record)?)?;
     Ok(instance)
 }
 

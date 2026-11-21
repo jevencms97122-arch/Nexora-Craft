@@ -815,9 +815,14 @@ pub async fn apply_wardrobe_skin(state: State<'_, AppState>, id: String) -> AppR
 
 /// Instance réservée au serveur officiel, créée ou remise à niveau à partir du pack officiel.
 /// L'avancement de l'installation est diffusé par l'événement « share-progress ».
+/// `renderer` : « opengl » (défaut) ou « vulkan ».
 #[tauri::command]
-pub async fn ensure_official_instance(app: AppHandle, state: State<'_, AppState>) -> AppResult<Instance> {
-    servers::ensure_official_instance(&app, &state.http).await
+pub async fn ensure_official_instance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    renderer: Option<String>,
+) -> AppResult<Instance> {
+    servers::ensure_official_instance(&app, &state.http, servers::Renderer::parse(renderer.as_deref())).await
 }
 
 /// Analyse des journaux par IA, via le relais (le launcher n'embarque aucune clé d'API).

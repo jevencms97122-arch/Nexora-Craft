@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import { analyzeLogs, type CrashReport } from "../lib/crash";
-import type { DownloadProgress, GameExited, GameLogLine, ImportProgress } from "../lib/types";
+import type { DownloadProgress, GameExited, GameLogLine, ImportProgress, Renderer } from "../lib/types";
 import { isSignedIn } from "./cloudStore";
 import { useInstanceStore } from "./instanceStore";
 import { toast } from "./toastStore";
@@ -29,7 +29,7 @@ interface GameState {
   /// Avancement de l'installation du pack officiel (mods et shaders), pendant cette préparation.
   officialProgress: ImportProgress | null;
   /// Rejoint le serveur officiel avec son instance dédiée (créée à la bonne version si besoin).
-  joinOfficial: (address: string) => Promise<void>;
+  joinOfficial: (address: string, renderer?: Renderer) => Promise<void>;
   /// Analyse les journaux actuels sans attendre un plantage.
   diagnose: () => void;
   dismissCrash: () => void;
@@ -79,7 +79,7 @@ export const useGameStore = create<GameState>((set, get) => {
     preparingOfficial: false,
     officialProgress: null,
 
-    joinOfficial: async (address) => {
+    joinOfficial: async (address, renderer = "opengl") => {
       if (!(await isSignedIn())) {
         set({ error: ACCOUNT_REQUIRED });
         toast.error(ACCOUNT_REQUIRED);
@@ -87,7 +87,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
       set({ preparingOfficial: true, officialProgress: null, error: null });
       try {
-        const instance = await api.ensureOfficialInstance();
+        const instance = await api.ensureOfficialInstance(renderer);
         await useInstanceStore.getState().refresh();
         set({ preparingOfficial: false, officialProgress: null });
         await get().launch(instance.id, address);

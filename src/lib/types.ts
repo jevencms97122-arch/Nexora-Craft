@@ -312,3 +312,6 @@ export interface ExportSummary {
   /// Fichiers embarqués dans l'archive.
   embedded: number;
 }
+
+/// Rendu du jeu pour le serveur officiel : chaque rendu a sa propre instance.
+export type Renderer = "opengl" | "vulkan";
