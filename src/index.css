@@ -952,3 +952,293 @@ textarea {
 .markdown th {
   color: var(--color-text);
 }
+
+/*
+ * Île dynamique (MusicIsland) : pastille de musique en haut de la fenêtre.
+ * La taille et le rayon sont animés depuis le composant avec une courbe « ressort » : l'île
+ * déborde un peu de sa cible avant de se poser. Le contenu replié et le contenu ouvert sont
+ * superposés et se fondent l'un dans l'autre.
+ */
+/*
+ * Fluidité : la taille est la seule chose qui coûte (elle recalcule la mise en page à chaque
+ * image), donc le reste est réduit au minimum. Pas de flou d'arrière-plan ni de `filter` sur
+ * l'île, pas d'ombre animée en continu, et le contenu a une taille fixe : il est rogné par
+ * l'île au lieu d'être remis en page à chaque image.
+ */
+.island {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  outline: none;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--glass-highlight) 14%, transparent), transparent 45%),
+    color-mix(in srgb, var(--color-bg) 92%, transparent);
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 10px 28px -10px var(--glass-shadow);
+  contain: layout paint;
+  will-change: width, height;
+  transform: translateZ(0);
+  transition:
+    width 0.4s cubic-bezier(0.3, 1.25, 0.5, 1),
+    height 0.4s cubic-bezier(0.3, 1.25, 0.5, 1),
+    border-radius 0.4s cubic-bezier(0.3, 1.25, 0.5, 1),
+    box-shadow 0.3s ease;
+}
+.island:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-accent), 0 12px 40px -12px var(--glass-shadow);
+}
+
+.island-enter {
+  animation: island-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.island-exit {
+  animation: island-out 0.28s cubic-bezier(0.5, 0, 0.75, 0) forwards;
+  pointer-events: none;
+}
+.island-bump {
+  animation: island-bump 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* Halo pendant la lecture : fixe (une ombre qui s'anime en continu redessine l'île à chaque image). */
+.island-live {
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 10px 28px -10px var(--glass-shadow),
+    0 0 20px -6px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+/* Chaque forme garde sa taille d'arrivée : elle n'est pas remise en page pendant l'étirement. */
+.island-layer {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  margin-left: calc(var(--w) / -2);
+  width: var(--w);
+  height: var(--h);
+  will-change: opacity, transform;
+  transition:
+    opacity 0.16s ease,
+    transform 0.28s cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+.island-compact {
+  --w: 232px;
+  --h: 36px;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0 0.95rem;
+  box-sizing: border-box;
+}
+.island-full {
+  --w: 408px;
+  --h: 142px;
+  padding: 14px 16px 10px;
+  box-sizing: border-box;
+  opacity: 0;
+  transform: scale(0.96);
+  pointer-events: none;
+}
+.island-open .island-compact {
+  opacity: 0;
+  transform: scale(0.92);
+  pointer-events: none;
+}
+.island-open .island-full {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition-delay: 0.04s, 0.04s;
+}
+
+.island-text {
+  animation: island-text-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.island-state {
+  color: var(--color-accent);
+  display: flex;
+}
+
+/* Équaliseur : quatre barres qui dansent en lecture, plates sinon. */
+.island-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 16px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.island-eq i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent);
+  transform-origin: bottom;
+  transform: scaleY(0.22);
+  transition: transform 0.4s ease;
+}
+.island-eq-on i {
+  animation: island-eq 0.9s ease-in-out infinite alternate;
+}
+.island-eq i:nth-child(2) { animation-delay: -0.35s; animation-duration: 0.75s; }
+.island-eq i:nth-child(3) { animation-delay: -0.6s; animation-duration: 1.05s; }
+.island-eq i:nth-child(4) { animation-delay: -0.15s; animation-duration: 0.85s; }
+
+.island-cover {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, var(--color-accent-hover), var(--color-accent));
+  box-shadow: 0 6px 18px -6px var(--color-accent);
+}
+.island-eq-cover {
+  width: 20px;
+  height: 18px;
+  gap: 3px;
+}
+.island-eq-cover i {
+  width: 4px;
+  background: var(--color-accent-ink);
+}
+
+.island-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  transition: color 0.2s, background-color 0.2s, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.island-btn:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  transform: scale(1.08);
+}
+.island-btn:active {
+  transform: scale(0.88);
+}
+.island-btn-big {
+  width: 46px;
+  height: 46px;
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+  box-shadow: 0 8px 22px -8px var(--color-accent);
+}
+.island-btn-big:hover {
+  color: var(--color-accent-ink);
+  background: var(--color-accent-hover);
+}
+
+/* Curseurs (position et volume). */
+.island-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--fill, 0%),
+    color-mix(in srgb, var(--color-text) 16%, transparent) var(--fill, 0%)
+  );
+}
+.island-range:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.island-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+  transform: scale(0);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.island-range:hover::-webkit-slider-thumb,
+.island-range:focus-visible::-webkit-slider-thumb,
+.island-range:active::-webkit-slider-thumb {
+  transform: scale(1);
+}
+
+@keyframes island-in {
+  from { opacity: 0; transform: translateY(-16px) scale(0.5); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes island-out {
+  to { opacity: 0; transform: translateY(-12px) scale(0.55); }
+}
+@keyframes island-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.07, 0.94); }
+  70% { transform: scale(0.98, 1.03); }
+  100% { transform: scale(1); }
+}
+@keyframes island-glow {
+  0%, 100% { box-shadow: inset 0 1px 0 var(--glass-highlight), 0 12px 40px -12px var(--glass-shadow), 0 0 0 0 transparent; }
+  50% { box-shadow: inset 0 1px 0 var(--glass-highlight), 0 12px 40px -12px var(--glass-shadow), 0 0 22px -4px color-mix(in srgb, var(--color-accent) 55%, transparent); }
+}
+@keyframes island-text-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes island-eq {
+  from { transform: scaleY(0.2); }
+  to { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island,
+  .island *,
+  .island-layer {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Pochettes dans l'île dynamique. */
+.island-mini-cover {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  object-fit: cover;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.island-cover-art {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-panel);
+}
+.island-cover-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.island-eq-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 14px;
+  height: 12px;
+  padding: 2px 3px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  gap: 1.5px;
+  box-sizing: content-box;
+}
+.island-eq-badge i {
+  width: 2px;
+  background: #fff;
+}

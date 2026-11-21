@@ -5,6 +5,7 @@ import { CrashModal } from "./components/CrashModal";
 import { DropImport } from "./components/DropImport";
 import { ImportModal } from "./components/ImportModal";
 import { MinecraftScene } from "./components/MinecraftScene";
+import { MusicIsland } from "./components/MusicIsland";
 import { Onboarding, needsOnboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/Toasts";
@@ -153,6 +154,7 @@ function AppShell() {
       <Sidebar />
       <div className="relative z-10 flex-1 flex flex-col min-w-0">
         <TitleBar />
+        <MusicIsland />
         <main
           key={displayed.pathname}
           className={`flex-1 overflow-y-auto overflow-x-hidden min-h-0 ${leaving ? "page-out" : "page-in"}`}

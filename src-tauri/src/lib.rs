@@ -15,6 +15,7 @@ mod java;
 mod minecraft;
 mod modrinth;
 mod music;
+mod nexora_music;
 mod paths;
 mod screenshots;
 mod servers;
@@ -100,6 +101,11 @@ pub fn run() {
             commands::import_instance_code,
             commands::list_wardrobe,
             commands::list_game_music,
+            commands::nexora_music_catalog,
+            commands::download_nexora_song,
+            commands::remove_nexora_song,
+            commands::list_nexora_songs,
+            commands::set_nexora_songs_enabled,
             commands::other_media_playing,
             commands::session_get,
             commands::session_set,

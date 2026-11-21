@@ -763,6 +763,40 @@ pub fn list_game_music() -> AppResult<Vec<crate::music::GameTrack>> {
     crate::music::list()
 }
 
+// ---------- Nexora Music ----------
+
+/// Le catalogue complet de Nexora Music.
+#[tauri::command]
+pub async fn nexora_music_catalog(state: State<'_, AppState>) -> AppResult<Vec<crate::nexora_music::CatalogSong>> {
+    crate::nexora_music::catalog(&state.http).await
+}
+
+/// Télécharge un morceau ; l'avancement est diffusé par l'événement « music-download ».
+#[tauri::command]
+pub async fn download_nexora_song(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<crate::nexora_music::LocalSong> {
+    crate::nexora_music::download(&app, &state.http, &id).await
+}
+
+#[tauri::command]
+pub fn remove_nexora_song(id: String) -> AppResult<()> {
+    crate::nexora_music::remove(&id)
+}
+
+/// Les morceaux déjà téléchargés.
+#[tauri::command]
+pub fn list_nexora_songs() -> Vec<crate::nexora_music::LocalSong> {
+    crate::nexora_music::list_local()
+}
+
+#[tauri::command]
+pub fn set_nexora_songs_enabled(ids: Vec<String>, enabled: bool) -> AppResult<()> {
+    crate::nexora_music::set_enabled(&ids, enabled)
+}
+
 #[tauri::command]
 pub fn list_wardrobe() -> AppResult<Vec<WardrobeSkin>> {
     skins::list_wardrobe()

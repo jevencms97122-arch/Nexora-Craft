@@ -1,15 +1,15 @@
 import { create } from "zustand";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "../lib/api";
+import type { LocalSong } from "../lib/types";
 
 /*
  * Musique d'ambiance du launcher.
  *
- * Les morceaux viennent de deux endroits :
- *  - les fichiers du jeu : les musiques que Minecraft a téléchargées chez Mojang en installant une
- *    version. Le launcher les lit sur place, il n'en embarque aucune. Elles apparaissent donc
- *    après un premier lancement du jeu ;
- *  - le dossier `src/assets/music/` du projet, pour des musiques à soi, embarquées à la compilation.
+ * Les morceaux viennent de Nexora Music : le joueur télécharge ceux qu'il veut depuis les
+ * Réglages, et choisit lesquels le launcher a le droit de jouer. Les musiques de Minecraft
+ * (celles que le jeu télécharge chez Mojang) ne sont plus utilisées, sauf si le joueur les remet.
+ * Le dossier `src/assets/music/` du projet permet encore d'embarquer des musiques à la compilation.
  *
  * La musique ne joue que lorsque la fenêtre du launcher est au premier plan, même si une partie
  * est en cours.
@@ -25,6 +25,9 @@ export interface Track {
   /// Nom affiché.
   name: string;
   url: string;
+  /// Artiste et pochette, pour les morceaux de Nexora Music.
+  artist?: string;
+  cover?: string | null;
 }
 
 const files = import.meta.glob("../assets/music/*.{mp3,ogg,wav,m4a,flac}", {
@@ -59,13 +62,18 @@ interface MusicSettings {
   pauseMinutes: number;
   /// De 0 à 100.
   volume: number;
+  /// Les musiques de Minecraft sont remises dans la liste (retirées par défaut).
+  gameMusic: boolean;
 }
 
 interface MusicState extends MusicSettings {
   /// Morceaux disponibles : musiques embarquées, puis musiques trouvées dans les fichiers du jeu.
   tracks: Track[];
-  /// Relit les musiques du jeu (à appeler au démarrage et après une installation du jeu).
+  /// Relit les musiques disponibles (à appeler au démarrage et après un téléchargement).
   loadTracks: () => Promise<void>;
+  /// Tous les morceaux de Nexora Music téléchargés, activés ou non.
+  library: LocalSong[];
+  setGameMusic: (on: boolean) => void;
   /// Morceau en cours (en lecture ou en pause), sinon `null`.
   current: Track | null;
   playing: boolean;
@@ -76,6 +84,15 @@ interface MusicState extends MusicSettings {
   setVolume: (volume: number) => void;
   /// Passe tout de suite à un autre morceau.
   skip: () => void;
+  /// Revient au morceau précédent (ou au début du morceau s'il joue depuis plus de 3 secondes).
+  previous: () => void;
+  /// Pause / lecture voulue par le joueur : elle n'est pas défaite quand la fenêtre revient au
+  /// premier plan.
+  togglePlay: () => void;
+  /// Se place à `fraction` (0 à 1) du morceau en cours.
+  seek: (fraction: number) => void;
+  /// Le joueur a mis la musique en pause lui-même.
+  manualPaused: boolean;
   /// La musique n'est autorisée que lorsque la fenêtre du launcher est au premier plan.
   setAllowed: (allowed: boolean) => void;
   /// Une autre application joue du son : la musique d'ambiance reste en retrait.
@@ -91,6 +108,7 @@ function load(): MusicSettings {
     repeat: "pause",
     pauseMinutes: DEFAULT_PAUSE_MINUTES,
     volume: DEFAULT_VOLUME,
+    gameMusic: false,
   };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<MusicSettings>;
@@ -124,6 +142,12 @@ let startedOnce = false;
 /// Vrai quand un morceau doit démarrer dès que la musique sera de nouveau autorisée.
 let pending = false;
 let lastId: string | null = null;
+/// Morceaux déjà joués, du plus ancien au plus récent : pour le bouton « précédent ».
+const history: string[] = [];
+const MAX_HISTORY = 30;
+/// Le joueur a relancé la lecture alors qu'une autre application jouait : on ne s'efface plus
+/// pour elle jusqu'à la fin du morceau.
+let override = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 /// Le navigateur a refusé la lecture automatique : on attend le premier clic.
 let waitingGesture = false;
@@ -138,6 +162,11 @@ let fade: ReturnType<typeof setInterval> | null = null;
 function cancelFade() {
   if (fade) clearInterval(fade);
   fade = null;
+}
+
+/// Position de lecture du morceau en cours, en secondes (durée inconnue = 0).
+export function playbackPosition() {
+  return { time: audio.currentTime || 0, duration: Number.isFinite(audio.duration) ? audio.duration : 0 };
 }
 
 /// Amène progressivement le volume à `to`, puis appelle `done`.
@@ -167,9 +196,9 @@ export const useMusicStore = create<MusicState>((set, get) => {
   audio.volume = targetVolume;
 
   function save() {
-    const { enabled, track, repeat, pauseMinutes, volume } = get();
+    const { enabled, track, repeat, pauseMinutes, volume, gameMusic } = get();
     try {
-      localStorage.setItem(KEY, JSON.stringify({ enabled, track, repeat, pauseMinutes, volume }));
+      localStorage.setItem(KEY, JSON.stringify({ enabled, track, repeat, pauseMinutes, volume, gameMusic }));
     } catch {
       // Stockage indisponible : les réglages ne seront pas mémorisés.
     }
@@ -201,12 +230,14 @@ export const useMusicStore = create<MusicState>((set, get) => {
       return;
     }
     if (!get().enabled) return;
-    if (get().current) resume();
-    else if (pending) start();
+    if (get().current) {
+      // Une pause voulue par le joueur reste une pause.
+      if (!get().manualPaused) resume();
+    } else if (pending) start();
   }
 
   async function pollMedia() {
-    if (polling || !allowed || !get().enabled) return;
+    if (polling || !allowed || !get().enabled || override) return;
     polling = true;
     try {
       const other = await api.otherMediaPlaying().catch(() => false);
@@ -288,9 +319,21 @@ export const useMusicStore = create<MusicState>((set, get) => {
       pending = true;
       return;
     }
+    begin(track, true);
+  }
+
+  /// Joue `track`. `record` : le morceau qu'on quitte rejoint l'historique (pas quand on revient en arrière).
+  function begin(track: Track, record: boolean) {
+    clearTimer();
     pending = false;
     startedOnce = true;
+    if (record && lastId && lastId !== track.id) {
+      history.push(lastId);
+      if (history.length > MAX_HISTORY) history.shift();
+    }
     lastId = track.id;
+    // Choisir un morceau, c'est vouloir l'entendre : la pause manuelle est levée.
+    set({ manualPaused: false });
     // Changement de morceau en cours de lecture : l'ancien s'efface avant que le nouveau n'arrive.
     fadeOutAndPause(() => {
       audio.src = track.url;
@@ -316,6 +359,8 @@ export const useMusicStore = create<MusicState>((set, get) => {
   function stop() {
     clearTimer();
     pending = false;
+    override = false;
+    set({ manualPaused: false });
     fadeOutAndPause(() => {
       audio.removeAttribute("src");
       set({ current: null, playing: false });
@@ -325,7 +370,8 @@ export const useMusicStore = create<MusicState>((set, get) => {
   audio.addEventListener("play", () => set({ playing: true }));
   audio.addEventListener("pause", () => set({ playing: false }));
   audio.addEventListener("ended", () => {
-    set({ current: null, playing: false });
+    override = false;
+    set({ current: null, playing: false, manualPaused: false });
     const { repeat, pauseMinutes } = get();
     if (repeat === "loop") start();
     else if (repeat === "pause") timer = setTimeout(start, Math.max(1, pauseMinutes) * 60_000);
@@ -345,16 +391,44 @@ export const useMusicStore = create<MusicState>((set, get) => {
     current: null,
     playing: false,
     otherMedia: false,
+    manualPaused: false,
     tracks: BUNDLED,
+    library: [],
 
     loadTracks: async () => {
-      const game = await api.listGameMusic().catch(() => []);
-      const tracks = [...BUNDLED, ...game.map((t) => ({ id: t.id, name: t.name, url: convertFileSrc(t.path) }))];
-      if (tracks.length === get().tracks.length) return;
+      const [local, game] = await Promise.all([
+        api.listNexoraSongs().catch(() => [] as LocalSong[]),
+        get().gameMusic ? api.listGameMusic().catch(() => []) : Promise.resolve([]),
+      ]);
+      const nexora: Track[] = local
+        .filter((s) => s.enabled)
+        .map((s) => ({
+          id: s.id,
+          name: s.title,
+          artist: s.artist,
+          cover: s.cover_path ? convertFileSrc(s.cover_path) : null,
+          url: convertFileSrc(s.audio_path),
+        }));
+      const tracks = [...BUNDLED, ...nexora, ...game.map((t) => ({ id: t.id, name: t.name, url: convertFileSrc(t.path) }))];
+      set({ library: local });
+      const known = get().tracks;
+      if (tracks.length === known.length && tracks.every((t, i) => t.id === known[i].id)) return;
       set({ tracks });
-      // Les musiques viennent d'apparaître (premier téléchargement du jeu) : on lance le morceau
-      // d'ouverture s'il n'a pas encore pu être joué.
-      if (!startedOnce && get().enabled && !get().current) start();
+      const { current, enabled } = get();
+      if (current && !tracks.some((t) => t.id === current.id)) {
+        // Le morceau en cours vient d'être retiré ou désactivé : on passe à un autre, ou on s'arrête.
+        if (tracks.length > 0 && enabled) start();
+        else stop();
+      } else if ((!startedOnce || pending) && enabled && !current) {
+        // Les premières musiques viennent d'apparaître : on lance le morceau d'ouverture.
+        start();
+      }
+    },
+
+    setGameMusic: (on) => {
+      set({ gameMusic: on });
+      save();
+      void get().loadTracks();
     },
 
     setEnabled: (enabled) => {
@@ -403,6 +477,44 @@ export const useMusicStore = create<MusicState>((set, get) => {
 
     skip: () => {
       if (get().enabled) start();
+    },
+
+    previous: () => {
+      if (!get().enabled || !get().current) return;
+      const before = history[history.length - 1];
+      const track = before ? get().tracks.find((t) => t.id === before) : undefined;
+      // Début du morceau si on est déjà bien avancé dedans, ou s'il n'y a rien avant.
+      if (audio.currentTime > 3 || !track) {
+        audio.currentTime = 0;
+        return;
+      }
+      history.pop();
+      begin(track, false);
+    },
+
+    togglePlay: () => {
+      if (!get().enabled) return;
+      if (!get().current) {
+        start();
+        return;
+      }
+      if (get().playing) {
+        set({ manualPaused: true });
+        fadeOutAndPause();
+        return;
+      }
+      set({ manualPaused: false });
+      // Le joueur veut entendre la musique, même si une autre application joue.
+      if (yielding) {
+        override = true;
+        setOther(false);
+      }
+      if (allowed) resume();
+    },
+
+    seek: (fraction) => {
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+      audio.currentTime = Math.min(1, Math.max(0, fraction)) * audio.duration;
     },
 
     setAllowed: (value) => {

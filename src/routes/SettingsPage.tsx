@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Dropdown, Icon, PageHeader, Spinner, Toggle, type IconName } from "../components/ui";
 import { BIOMES } from "../components/MinecraftScene";
+import { NexoraMusicLibrary } from "../components/NexoraMusicLibrary";
 import { RamAdvice } from "../components/RamAdvice";
 import { formatRam, normalizeRam } from "../lib/format";
 import { setStatsEnabled, statsEnabled } from "../lib/telemetry";
@@ -92,8 +93,8 @@ function MusicSettings({ part }: { part: "bar" | "track" | "repeat" }) {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium">Pas encore de musique</div>
           <div className="text-[11px] text-text-faint leading-relaxed mt-0.5">
-            Le launcher joue les musiques de Minecraft, qui se téléchargent avec le jeu. Lance une instance une
-            première fois : elles apparaîtront ici.
+            Le launcher joue les musiques de Nexora Music. Télécharge des morceaux dans la liste en dessous, et
+            laisse activés ceux que tu veux entendre.
           </div>
         </div>
       </div>
@@ -576,8 +577,13 @@ export function SettingsPage() {
         id="musique"
         icon="volume"
         title="Musique"
-        description="Une musique d'ambiance dans le launcher. Elle se coupe toute seule quand tu passes sur une autre fenêtre (le jeu, par exemple) et reprend à ton retour. Elle reste aussi silencieuse tant qu'un autre média (musique, vidéo YouTube...) joue sur ton PC."
-        below={<MusicSettings part="track" />}
+        description="Une musique d'ambiance dans le launcher, tirée de Nexora Music. Elle se coupe toute seule quand tu passes sur une autre fenêtre (le jeu, par exemple) et reprend à ton retour. Elle reste aussi silencieuse tant qu'un autre média (musique, vidéo YouTube...) joue sur ton PC."
+        below={
+          <>
+            <MusicSettings part="track" />
+            <NexoraMusicLibrary />
+          </>
+        }
         align="start"
       >
         <MusicSettings part="bar" />

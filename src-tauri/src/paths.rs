@@ -19,6 +19,11 @@ pub fn backups_dir() -> PathBuf {
     app_data_dir().join("backups")
 }
 
+/// Musiques téléchargées depuis Nexora Music : un sous-dossier par morceau.
+pub fn music_dir() -> PathBuf {
+    app_data_dir().join("music")
+}
+
 pub fn runtimes_dir() -> PathBuf {
     app_data_dir().join("runtimes")
 }

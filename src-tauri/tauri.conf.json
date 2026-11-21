@@ -22,8 +22,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https:; media-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost data: blob: https://*.supabase.co wss://*.supabase.co; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'",
-      "devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: blob: asset: http://asset.localhost https:; media-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost data: blob: ws://localhost:1420 http://localhost:1420 https://*.supabase.co wss://*.supabase.co",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https: http://92.49.99.59:8090; media-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost data: blob: https://*.supabase.co wss://*.supabase.co; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'",
+      "devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: blob: asset: http://asset.localhost https: http://92.49.99.59:8090; media-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost data: blob: ws://localhost:1420 http://localhost:1420 https://*.supabase.co wss://*.supabase.co",
       "assetProtocol": {
         "enable": true,
         "scope": [

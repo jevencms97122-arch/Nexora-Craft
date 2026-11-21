@@ -3,6 +3,8 @@ import type {
   Account,
   AccountsFile,
   AiReport,
+  CatalogSong,
+  LocalSong,
   Backup,
   ExportSummary,
   World,
@@ -61,6 +63,15 @@ export const api = {
   /// Exporte l'instance en `.mrpack` (format Modrinth) vers `dest`.
   exportInstanceMrpack: (instanceId: string, dest: string) =>
     invoke<ExportSummary>("export_instance_mrpack", { instanceId, dest }),
+
+  /// Le catalogue de Nexora Music.
+  nexoraMusicCatalog: () => invoke<CatalogSong[]>("nexora_music_catalog"),
+  /// Télécharge un morceau (avancement par l'événement « music-download »).
+  downloadNexoraSong: (id: string) => invoke<LocalSong>("download_nexora_song", { id }),
+  removeNexoraSong: (id: string) => invoke<void>("remove_nexora_song", { id }),
+  /// Les morceaux de Nexora Music déjà téléchargés.
+  listNexoraSongs: () => invoke<LocalSong[]>("list_nexora_songs"),
+  setNexoraSongsEnabled: (ids: string[], enabled: boolean) => invoke<void>("set_nexora_songs_enabled", { ids, enabled }),
 
   /// Mémoire vive totale du PC, en Mo (nul si illisible).
   systemMemoryMb: () => invoke<number | null>("system_memory_mb"),

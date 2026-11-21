@@ -6,7 +6,8 @@ use crate::error::{AppError, AppResult};
 use crate::paths;
 use crate::state::AppState;
 
-const REPO_API: &str = "https://api.github.com/repos/playit-cloud/playit-agent/releases/latest";
+const REPO_API: &str = "https://api.github.com/repos/playit-cloud/playit-agent/releases/tags/v0.15.26";
+// Version figée : les agents 1.x/2.x ne prennent plus `--secret` (service playitd), la 0.15.x oui.
 const ASSET_NAME: &str = "playit-windows-x86_64-signed.exe";
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -26,7 +27,7 @@ struct GithubAsset {
 }
 
 fn agent_path() -> std::path::PathBuf {
-    paths::app_data_dir().join("tools").join("playit-agent.exe")
+    paths::app_data_dir().join("tools").join("playit-agent-0.15.26.exe")
 }
 
 async fn ensure_agent(client: &reqwest::Client) -> AppResult<std::path::PathBuf> {

@@ -265,6 +265,34 @@ export interface ProjectDetails {
   published: string | null;
 }
 
+/// Un morceau du catalogue Nexora Music.
+export interface CatalogSong {
+  id: string;
+  title: string;
+  artist: string;
+  genre: string;
+  cover_url: string | null;
+}
+
+/// Un morceau Nexora Music téléchargé sur le PC.
+export interface LocalSong {
+  id: string;
+  title: string;
+  artist: string;
+  genre: string;
+  audio_path: string;
+  cover_path: string | null;
+  size_bytes: number;
+  /// Le launcher a le droit de le jouer.
+  enabled: boolean;
+}
+
+export interface MusicDownloadProgress {
+  id: string;
+  received: number;
+  total: number;
+}
+
 export interface World {
   name: string;
   size_bytes: number;
