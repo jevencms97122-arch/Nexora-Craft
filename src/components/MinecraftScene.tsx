@@ -77,7 +77,8 @@ const TAIL_FRAMES = [
  * l'étang et la clôture restent à la même place. Seuls varient les couleurs du relief et du sol,
  * les arbres, la végétation, l'eau et quelques détails (neige sur le toit, pétales, lucioles...).
  */
-export type Biome = "plains" | "snow" | "desert" | "cherry" | "swamp" | "mushroom";
+/// « christmas » n'est pas dans la liste des réglages : c'est le décor de la page Nexora SMP.
+export type Biome = "plains" | "snow" | "desert" | "cherry" | "swamp" | "mushroom" | "christmas";
 
 export const BIOMES: { id: Biome; name: string; hint: string }[] = [
   { id: "plains", name: "Plaine", hint: "Chênes, fleurs et étang" },
@@ -139,6 +140,8 @@ interface BiomeDef {
   fireflies: number;
   /// Ce que devient la pluie ici : neige en montagne, rien dans le désert.
   rain: Weather;
+  /// Décor de Noël : grand sapin décoré, lumières, cadeaux, aurore boréale et neige continue.
+  festive?: boolean;
 }
 
 const WOOD_HOUSE: HousePalette = {
@@ -179,26 +182,38 @@ const PLAINS: BiomeDef = {
   rain: "rain",
 };
 
+const SNOW: BiomeDef = {
+  ...PLAINS,
+  mountain: { rock: "#93a3b8", light: "#aab9cc", dark: "#8292a8", cap: "#f4f8ff", capBelow: 200 },
+  farHill: ["#dfe8f2", "#f4f8ff"],
+  nearHill: ["#c9d6e6", "#e6eef8"],
+  turf: { top: ["#ffffff", "#eef4fb"], under: ["#e1eaf5", "#d3dfee"], drip: ["#c5d3e6", "#b9c9df"] },
+  water: { surface: "#d6ecff", top: "#a9d2f5", deep: "#6fa3d8", glint: "#ffffff", glintDeep: "#c4e0fa" },
+  frozen: true,
+  lilies: false,
+  tree: "spruce",
+  trees: [[28, 22], [52, 16], [292, 25], [312, 18]],
+  leaf: { light: "#3f7a4a", mid: "#2f6340", dark: "#254f35", shade: "#1f432d", shine: "#4a8a55", flash: "#5a9a64" },
+  falling: null,
+  blades: { count: 24, colors: ["#7c8f6a", "#6a7d5c"], flowers: [], flowerChance: 0 },
+  snowy: true,
+  butterflies: false,
+  fireflies: 0,
+  rain: "snow",
+};
+
 const BIOME_DEFS: Record<Biome, BiomeDef> = {
   plains: PLAINS,
-  snow: {
-    ...PLAINS,
-    mountain: { rock: "#93a3b8", light: "#aab9cc", dark: "#8292a8", cap: "#f4f8ff", capBelow: 200 },
-    farHill: ["#dfe8f2", "#f4f8ff"],
-    nearHill: ["#c9d6e6", "#e6eef8"],
-    turf: { top: ["#ffffff", "#eef4fb"], under: ["#e1eaf5", "#d3dfee"], drip: ["#c5d3e6", "#b9c9df"] },
-    water: { surface: "#d6ecff", top: "#a9d2f5", deep: "#6fa3d8", glint: "#ffffff", glintDeep: "#c4e0fa" },
-    frozen: true,
-    lilies: false,
-    tree: "spruce",
-    trees: [[28, 22], [52, 16], [292, 25], [312, 18]],
-    leaf: { light: "#3f7a4a", mid: "#2f6340", dark: "#254f35", shade: "#1f432d", shine: "#4a8a55", flash: "#5a9a64" },
-    falling: null,
-    blades: { count: 24, colors: ["#7c8f6a", "#6a7d5c"], flowers: [], flowerChance: 0 },
-    snowy: true,
-    butterflies: false,
-    fireflies: 0,
-    rain: "snow",
+  snow: SNOW,
+  christmas: {
+    ...SNOW,
+    // Sol entièrement enneigé : plus de terre visible sous la surface.
+    soil: ["#e7eef8", "#e2eaf5", "#dce6f2", "#e7eef8", "#edf3fa"],
+    trees: [[16, 26], [42, 18], [298, 28], [316, 20]],
+    blades: { count: 0, colors: ["#7c8f6a", "#6a7d5c"], flowers: [], flowerChance: 0 },
+    // La neige de Noël est dessinée à part : pas de météo grise par-dessus.
+    rain: "clear",
+    festive: true,
   },
   desert: {
     ...PLAINS,
@@ -466,6 +481,28 @@ function drawNearHills(ctx: Ctx, def: BiomeDef) {
   }
 }
 
+/// Rangée de petits sapins enneigés posés sur une ligne de relief.
+function drawForestRow(ctx: Ctx, seed: number, gap: number, size: number, ridge: (x: number) => number) {
+  const r = rng(seed);
+  for (let x = -4; x < W + 4; x += gap + Math.floor(r() * gap)) {
+    const height = size + Math.floor(r() * size * 0.7);
+    const base = ridge(x) + 1;
+    for (let row = 0; row < height; row++) {
+      const half = Math.floor(((row + 1) / height) * (height * 0.42)) + (row % 3 === 2 ? 0 : 1);
+      const y = base - height + row;
+      px(ctx, x - half, y, half * 2 + 1, 1, row % 3 === 0 ? "#dfe9f5" : row % 3 === 1 ? "#2c5a44" : "#234a38");
+    }
+  }
+}
+
+function drawFarForest(ctx: Ctx) {
+  drawForestRow(ctx, 41, 5, 7, (x) => 114 + Math.round(Math.sin(x * 0.03) * 6 + Math.sin(x * 0.011 + 1) * 8));
+}
+
+function drawNearForest(ctx: Ctx) {
+  drawForestRow(ctx, 83, 9, 10, (x) => 130 + Math.round(Math.sin(x * 0.05 + 2) * 4 + Math.sin(x * 0.017) * 5));
+}
+
 /// Les couches lointaines sont voilées vers la couleur de l'horizon (perspective atmosphérique).
 function buildBackLayer(env: Env, def: BiomeDef) {
   const haze = mixRgb(mixRgb(HAZE_DAY, HAZE_NIGHT, env.night), HAZE_DUSK, env.twilight * 0.45);
@@ -483,7 +520,9 @@ function buildBackLayer(env: Env, def: BiomeDef) {
   };
   layer((c) => drawMountains(c, def), tint(0.55, 0.8));
   layer((c) => drawFarHills(c, def), tint(0.3, 0.76));
+  if (def.festive) layer(drawFarForest, tint(0.22, 0.74));
   layer((c) => drawNearHills(c, def), tint(0.12, 0.7));
+  if (def.festive) layer(drawNearForest, tint(0.08, 0.62));
   return out;
 }
 
@@ -502,6 +541,16 @@ interface Foreground {
   leaves: Point[];
   canopies: Point[];
   blades: Blade[];
+  /// Petites lumières de Noël (sapin et maison), vides hors du décor de Noël.
+  bulbs: Bulb[];
+}
+
+interface Bulb {
+  x: number;
+  y: number;
+  color: string;
+  phase: number;
+  speed: number;
 }
 
 function drawTree(ctx: Ctx, r: () => number, x: number, height: number, leaves: Point[], def: BiomeDef) {
@@ -714,12 +763,16 @@ function drawHouse(ctx: Ctx, r: () => number, def: BiomeDef) {
 
 function drawFence(ctx: Ctx, def: BiomeDef) {
   for (let x = FENCE.x0; x <= FENCE.x1; x += 6) {
+    // Décor de Noël : le grand sapin prend la place de la clôture, seul le poteau de la lanterne reste.
+    if (def.festive && x !== FENCE.x1) continue;
     const top = x === FENCE.x1 ? LANTERN.y + 4 : GROUND - 8;
     px(ctx, x, top, 2, GROUND - top, "#9c7744");
     px(ctx, x + 1, top, 1, GROUND - top, "#7d5d34");
     if (def.snowy && x !== FENCE.x1) px(ctx, x, top - 1, 2, 1, "#f4f8ff");
   }
-  for (const ry of [GROUND - 6, GROUND - 3]) px(ctx, FENCE.x0 + 2, ry, FENCE.x1 - FENCE.x0 - 2, 1, "#b48a52");
+  if (!def.festive) {
+    for (const ry of [GROUND - 6, GROUND - 3]) px(ctx, FENCE.x0 + 2, ry, FENCE.x1 - FENCE.x0 - 2, 1, "#b48a52");
+  }
   // Cadre de la lanterne (la flamme est dessinée avec les éléments lumineux).
   px(ctx, LANTERN.x - 1, LANTERN.y - 1, 3, 1, "#2e2e2e");
   px(ctx, LANTERN.x - 1, LANTERN.y, 1, 3, "#3a3a3a");
@@ -752,7 +805,7 @@ function drawGround(ctx: Ctx, r: () => number, def: BiomeDef) {
       if (r() < 0.2) px(ctx, x, y++, 1, 1, turf.drip[1]);
     }
     for (; y < H; y++) {
-      const c = r() < 0.025 ? "#8a8a8a" : pick(r, def.soil);
+      const c = !def.festive && r() < 0.025 ? "#8a8a8a" : pick(r, def.soil);
       px(ctx, x, y, 1, 1, c);
     }
   }
@@ -778,17 +831,130 @@ function drawGround(ctx: Ctx, r: () => number, def: BiomeDef) {
   px(ctx, FIRE_X - 5, GROUND - 1, 11, 1, "#3a3a3a");
 }
 
+// ---------- Décor de Noël ----------
+
+const XMAS_TREE = { x: 262, top: GROUND - 47 };
+const ORNAMENT_COLORS = ["#ff4d5a", "#ffd27a", "#fff4dc", "#ff4d5a", "#ffd27a"];
+
+/// Grand sapin décoré : cinq étages enneigés et des boules lumineuses réparties sur chacun.
+function drawChristmasTree(ctx: Ctx, r: () => number, def: BiomeDef, bulbs: Bulb[]) {
+  const { x, top } = XMAS_TREE;
+  const leaf = def.leaf;
+  px(ctx, x - 1, GROUND - 6, 3, 6, "#5a4122");
+  px(ctx, x + 1, GROUND - 6, 1, 6, "#44311b");
+
+  let y = top;
+  for (let tier = 0; tier < 5; tier++) {
+    const rows = 8 + tier;
+    const halfTop = tier === 0 ? 0 : 2 + tier * 2;
+    const halfBottom = 5 + tier * 2.8;
+    for (let row = 0; row < rows; row++) {
+      const half = Math.round(halfTop + (halfBottom - halfTop) * (row / (rows - 1)));
+      for (let dx = -half; dx <= half; dx++) {
+        // Lumière venant du feu, à gauche : le côté droit reste dans l'ombre.
+        const side = dx / (half || 1);
+        let c = side < -0.35 ? leaf.light : side < 0.3 ? leaf.mid : leaf.dark;
+        if (r() < 0.14) c = leaf.shade;
+        const onEdge = Math.abs(dx) >= half - 1;
+        if ((onEdge && r() < 0.55) || (row === rows - 1 && r() < 0.6)) c = r() < 0.3 ? "#dfe9f5" : "#f4f8ff";
+        px(ctx, x + dx, y + row, 1, 1, c);
+      }
+    }
+    // Boules : réparties sur la largeur de l'étage, sans toucher les bords enneigés.
+    const count = 3 + tier;
+    for (let i = 0; i < count; i++) {
+      const row = 3 + Math.floor(r() * (rows - 4));
+      const half = Math.round(halfTop + (halfBottom - halfTop) * (row / (rows - 1))) - 2;
+      const spot = ((i + 0.5) / count) * 2 - 1;
+      bulbs.push({
+        x: x + Math.round(spot * Math.max(1, half)),
+        y: y + row,
+        color: ORNAMENT_COLORS[(i + tier) % ORNAMENT_COLORS.length],
+        phase: r() * Math.PI * 2,
+        speed: 1 + r() * 1.5,
+      });
+    }
+    y += rows - 2;
+  }
+}
+
+/// Cadeaux au pied du sapin.
+function drawGifts(ctx: Ctx) {
+  const gifts = [
+    { x: 247, w: 8, h: 6, box: "#c9303d", ribbon: "#ffd27a" },
+    { x: 256, w: 6, h: 4, box: "#f0ece2", ribbon: "#c9303d" },
+    { x: 266, w: 9, h: 7, box: "#22694c", ribbon: "#ffd27a" },
+    { x: 274, w: 5, h: 4, box: "#ffd27a", ribbon: "#c9303d" },
+  ];
+  for (const g of gifts) {
+    const y = GROUND - g.h;
+    const mid = g.x + Math.floor(g.w / 2);
+    px(ctx, g.x, y, g.w, g.h, g.box);
+    px(ctx, g.x + g.w - 1, y, 1, g.h, "rgba(0,0,0,0.22)");
+    px(ctx, mid, y, 1, g.h, g.ribbon);
+    px(ctx, g.x, y + Math.floor(g.h / 2), g.w, 1, g.ribbon);
+    px(ctx, mid - 1, y - 1, 1, 1, g.ribbon);
+    px(ctx, mid + 1, y - 1, 1, 1, g.ribbon);
+  }
+}
+
+/// Couronne sur la porte, stalactites de glace et guirlande blanc chaud le long du toit.
+function drawHouseDecor(ctx: Ctx, r: () => number, bulbs: Bulb[]) {
+  const { x0, x1, top } = HOUSE;
+
+  for (const [dx, dy] of [[-1, -3], [0, -3], [1, -3], [-2, -2], [2, -2], [-3, -1], [3, -1], [-3, 0], [3, 0], [-3, 1], [3, 1], [-2, 2], [2, 2], [-1, 3], [0, 3], [1, 3]]) {
+    px(ctx, 209 + dx, 135 + dy, 1, 1, (dx + dy) % 2 === 0 ? "#2f7a50" : "#225c3c");
+  }
+  px(ctx, 208, 138, 3, 1, "#e0313f");
+  px(ctx, 209, 139, 1, 1, "#a8222d");
+
+  for (let x = x0 - 4; x < x1 + 4; x += 2) {
+    const length = 1 + Math.floor(r() * 3);
+    px(ctx, x, top + 1, 1, length, "rgba(214,238,255,0.85)");
+  }
+
+  const add = (x: number, y: number) =>
+    bulbs.push({ x, y, color: "#ffe2a8", phase: r() * Math.PI * 2, speed: 0.8 + r() });
+  let left = x0 - 5;
+  let right = x1 + 5;
+  let y = top - 2;
+  while (left < right) {
+    add(left, y);
+    if (right - 1 !== left) add(right - 1, y);
+    y -= 2;
+    left += 3;
+    right -= 3;
+  }
+  for (let x = x0 - 3; x <= x1 + 3; x += 4) add(x, top);
+}
+
+/// Congères irrégulières au pied du décor (ni sur l'étang, ni dans le feu, ni devant la porte).
+function drawSnowDrifts(ctx: Ctx) {
+  for (let x = 0; x < W; x++) {
+    if (pondDepth(x) > 0 || Math.abs(x - FIRE_X) < 10 || (x >= 204 && x < 214)) continue;
+    const d = Math.max(0, Math.round(1 + Math.sin(x * 0.13) * 1.1 + Math.sin(x * 0.37 + 1) * 0.6));
+    if (d === 0) continue;
+    px(ctx, x, GROUND - d, 1, d, "#eef4fb");
+    px(ctx, x, GROUND - d, 1, 1, "#ffffff");
+  }
+}
+
 function buildForeground(def: BiomeDef): Foreground {
   const canvas = makeCanvas();
   const ctx = ctxOf(canvas);
   const r = rng(1337);
   const leaves: Point[] = [];
+  const bulbs: Bulb[] = [];
 
   const trees = def.trees;
   trees.forEach(([x, h], index) => drawBiomeTree(ctx, r, x, h, index, leaves, def));
+  if (def.festive) drawChristmasTree(ctx, r, def, bulbs);
   drawHouse(ctx, r, def);
+  if (def.festive) drawHouseDecor(ctx, r, bulbs);
   drawFence(ctx, def);
+  if (def.festive) drawGifts(ctx);
   drawGround(ctx, r, def);
+  if (def.festive) drawSnowDrifts(ctx);
 
   // Herbes hautes et fleurs : dessinées à chaque image pour onduler au vent.
   const blades: Blade[] = [];
@@ -810,6 +976,7 @@ function buildForeground(def: BiomeDef): Foreground {
     leaves,
     canopies: trees.map(([x, h]) => ({ x, y: GROUND - h - 4 })),
     blades,
+    bulbs,
   };
 }
 
@@ -1196,6 +1363,51 @@ function drawEmissive(ctx: Ctx, t: number, state: SceneState, env: Env, def: Bio
   }
 }
 
+/// Lumières de Noël : chaque ampoule scintille à son rythme, avec un petit halo en croix.
+function drawFestiveLights(ctx: Ctx, t: number, fg: Foreground, env: Env) {
+  for (const b of fg.bulbs) {
+    const on = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * b.speed + b.phase));
+    ctx.globalAlpha = on;
+    px(ctx, b.x, b.y, 1, 1, b.color);
+    ctx.globalAlpha = on * (0.08 + 0.2 * env.night);
+    px(ctx, b.x - 1, b.y, 3, 1, b.color);
+    px(ctx, b.x, b.y - 1, 1, 3, b.color);
+  }
+  // Étoile au sommet du sapin.
+  const { x, top } = XMAS_TREE;
+  const pulse = 0.82 + 0.18 * Math.sin(t * 1.4);
+  ctx.globalAlpha = pulse;
+  px(ctx, x - 2, top - 2, 5, 1, "#ffd27a");
+  px(ctx, x, top - 4, 1, 5, "#ffd27a");
+  px(ctx, x - 1, top - 3, 3, 3, "#ffe9b0");
+  px(ctx, x, top - 2, 1, 1, "#ffffff");
+  ctx.globalAlpha = 1;
+}
+
+const AURORA = [
+  { y: 46, amp: 9, length: 30, phase: 0, base: [64, 255, 170] as Rgb, tip: [70, 170, 255] as Rgb, alpha: 0.2 },
+  { y: 62, amp: 7, length: 24, phase: 2.4, base: [52, 226, 190] as Rgb, tip: [140, 110, 255] as Rgb, alpha: 0.13 },
+];
+
+/// Aurore boréale en rideaux verticaux, redessinée quelques fois par seconde seulement.
+function drawAurora(ctx: Ctx, t: number, level: number) {
+  ctx.clearRect(0, 0, W, H);
+  const step = LOW_END ? 4 : 2;
+  for (const a of AURORA) {
+    for (let x = 0; x < W; x += step) {
+      const base = a.y + Math.sin(x * 0.021 + t * 0.09 + a.phase) * a.amp + Math.sin(x * 0.058 - t * 0.14 + a.phase * 2) * a.amp * 0.35;
+      const curtain = Math.sin(x * 0.11 + t * 0.32 + a.phase);
+      const shimmer = 0.35 + 0.65 * curtain * curtain;
+      const length = a.length * (0.65 + 0.35 * Math.sin(x * 0.04 + t * 0.2 + a.phase));
+      for (let k = 0; k < length; k += 2) {
+        const f = k / length;
+        const alpha = (1 - f) * (1 - f) * a.alpha * shimmer * level;
+        px(ctx, x, Math.round(base - k), step, 2, rgba(mixRgb(a.base, a.tip, f), alpha));
+      }
+    }
+  }
+}
+
 // ---------- Effets haute résolution ----------
 
 interface View {
@@ -1221,15 +1433,21 @@ function fireFlicker(t: number) {
 }
 
 /// Couche d'obscurité : trouée autour des lumières puis limitée aux pixels du premier plan.
-function drawDarkness(dark: Ctx, v: View, t: number, litMask: HTMLCanvasElement, env: Env) {
+function drawDarkness(dark: Ctx, v: View, t: number, litMask: HTMLCanvasElement, env: Env, def: BiomeDef) {
   const k = fireFlicker(t);
   const candle = 0.9 + Math.sin(t * 7) * 0.06;
   dark.globalCompositeOperation = "source-over";
   dark.clearRect(0, 0, v.w, v.h);
-  dark.fillStyle = `rgba(4,7,24,${(0.72 * env.night).toFixed(3)})`;
+  // Sur la neige, la nuit tire vers le bleu de lune au lieu d'un gris éteint.
+  dark.fillStyle = def.festive
+    ? `rgba(9,22,62,${(0.64 * env.night).toFixed(3)})`
+    : `rgba(4,7,24,${(0.72 * env.night).toFixed(3)})`;
   dark.fillRect(0, 0, v.w, v.h);
 
   dark.globalCompositeOperation = "destination-out";
+  if (def.festive) {
+    glow(dark, v, XMAS_TREE.x, GROUND - 20, 36, [[0, "rgba(0,0,0,0.5)"], [1, "rgba(0,0,0,0)"]]);
+  }
   glow(dark, v, FIRE_X, GROUND - 8, 62 * k, [[0, "rgba(0,0,0,1)"], [0.35, "rgba(0,0,0,0.75)"], [1, "rgba(0,0,0,0)"]]);
   for (const w of WINDOWS) glow(dark, v, w.x + 4, w.y + 6, 24 * candle, [[0, "rgba(0,0,0,0.7)"], [1, "rgba(0,0,0,0)"]]);
   glow(dark, v, TORCH.x, TORCH.y + 1, 14 * k, [[0, "rgba(0,0,0,0.6)"], [1, "rgba(0,0,0,0)"]]);
@@ -1269,6 +1487,12 @@ function drawLightGlows(ctx: Ctx, v: View, t: number, state: SceneState, env: En
   }
   if (lamps > 0) {
     for (const w of WINDOWS) glow(ctx, v, w.x + 4, w.y + 4, 22, [[0, `rgba(255,190,90,${(0.26 * lamps).toFixed(3)})`], [1, none]]);
+  }
+
+  if (def.festive) {
+    const pulse = 0.82 + 0.18 * Math.sin(t * 1.4);
+    glow(ctx, v, XMAS_TREE.x, GROUND - 22, 38, [[0, `rgba(255,190,110,${(0.05 + 0.08 * n).toFixed(3)})`], [1, none]]);
+    glow(ctx, v, XMAS_TREE.x, XMAS_TREE.top - 2, 16, [[0, `rgba(255,222,130,${((0.2 + 0.4 * n) * pulse).toFixed(3)})`], [1, none]]);
   }
 
   const flies = fireflyLevel(env, def);
@@ -1403,6 +1627,28 @@ function drawWeather(ctx: Ctx, v: View, t: number, env: Env) {
   }
 }
 
+const FESTIVE_SNOW = [
+  { count: LOW_END ? 30 : 70, size: 0.26, speed: 0.028, sway: 5, color: "rgba(226,236,255,0.4)" },
+  { count: LOW_END ? 20 : 46, size: 0.42, speed: 0.048, sway: 9, color: "rgba(240,246,255,0.65)" },
+  { count: LOW_END ? 10 : 22, size: 0.66, speed: 0.08, sway: 14, color: "rgba(255,255,255,0.92)" },
+];
+
+/// Neige de Noël en trois profondeurs : les flocons proches sont plus gros et tombent plus vite.
+function drawFestiveSnow(ctx: Ctx, v: View, t: number) {
+  const unit = v.s / 4;
+  FESTIVE_SNOW.forEach((layer, l) => {
+    ctx.fillStyle = layer.color;
+    const size = Math.max(1, Math.round(v.s * layer.size));
+    for (let i = 0; i < layer.count; i++) {
+      const speed = v.h * layer.speed * (0.85 + hash(i, 5 + l) * 0.3);
+      const y = ((hash(i, 7 + l) * (v.h + 20) + t * speed) % (v.h + 20)) - 10;
+      const drift = Math.sin(t * 0.6 + i * 1.7) * layer.sway * unit + t * (3 + l * 3) * unit;
+      const x = ((((hash(i, 13 + l) * (v.w + 40) + drift) % (v.w + 40)) + (v.w + 40)) % (v.w + 40)) - 20;
+      ctx.fillRect(Math.round(x), Math.round(y), size, size);
+    }
+  });
+}
+
 // ---------- Composant ----------
 
 interface Props {
@@ -1490,6 +1736,9 @@ export function MinecraftScene({
     const emCtx = ctxOf(emissive);
     const dark = document.createElement("canvas");
     const darkCtx = ctxOf(dark);
+    const aurora = makeCanvas();
+    const auroraCtx = ctxOf(aurora);
+    let auroraAt = -Infinity;
 
     const state: SceneState = {
       smoke: [],
@@ -1523,6 +1772,16 @@ export function MinecraftScene({
 
       // 1. Décor basse résolution.
       mainCtx.drawImage(sky, 0, 0);
+      const auroraLevel = def.festive ? clamp01((env.night - 0.5) / 0.5) : 0;
+      if (auroraLevel > 0) {
+        if (Math.abs(t - auroraAt) > 0.16) {
+          drawAurora(auroraCtx, t, auroraLevel);
+          auroraAt = t;
+        }
+        mainCtx.globalCompositeOperation = "lighter";
+        mainCtx.drawImage(aurora, 0, 0);
+        mainCtx.globalCompositeOperation = "source-over";
+      }
       drawSkyObjects(mainCtx, t, env);
       mainCtx.drawImage(back, 0, 0);
       litCtx.clearRect(0, 0, W, H);
@@ -1531,12 +1790,13 @@ export function MinecraftScene({
       mainCtx.drawImage(lit, 0, 0);
       emCtx.clearRect(0, 0, W, H);
       drawEmissive(emCtx, t, state, env, def);
+      if (def.festive) drawFestiveLights(emCtx, t, fg, env);
 
       // 2. Agrandissement net + éclairage haute résolution.
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(main, view.ox, view.oy, W * view.s, H * view.s);
       if (env.night > 0.02) {
-        drawDarkness(darkCtx, view, t, lit, env);
+        drawDarkness(darkCtx, view, t, lit, env, def);
         ctx.drawImage(dark, 0, 0);
       }
       // Rayons de soleil par beau temps, tant que le soleil est assez haut.
@@ -1547,6 +1807,7 @@ export function MinecraftScene({
       if (state.star) drawShootingStar(ctx, view, t, state.star);
       drawFog(ctx, view, t, env);
       drawWeather(ctx, view, t, env);
+      if (def.festive) drawFestiveSnow(ctx, view, t);
       drawVignette(ctx, view, env);
     };
 

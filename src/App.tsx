@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { CommandPalette } from "./components/CommandPalette";
 import { CrashModal } from "./components/CrashModal";
 import { DropImport } from "./components/DropImport";
 import { ImportModal } from "./components/ImportModal";
 import { MinecraftScene } from "./components/MinecraftScene";
+import { ModeTransition, type LauncherMode } from "./components/ModeTransition";
 import { MusicIsland } from "./components/MusicIsland";
 import { Onboarding, needsOnboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
@@ -86,12 +87,33 @@ function AppShell() {
   }, [cloudUser, runningId, currentServer]);
 
   // Transition de page : l'ancienne page joue sa sortie, puis la nouvelle est montée et entre.
-  const [displayed, setDisplayed] = useState(location);
+  // Au démarrage, « / » redirige vers Nexora SMP : on l'affiche tout de suite, sans transition.
+  const [displayed, setDisplayed] = useState(() =>
+    location.pathname === "/" ? { ...location, pathname: "/smp" } : location,
+  );
   const [leaving, setLeaving] = useState(false);
+  const startupRedirect = useRef(location.pathname === "/");
+  const latestLocation = useRef(location);
+  latestLocation.current = location;
+  // Le launcher s'ouvre avec la transition : elle recouvre l'écran de chargement puis révèle la page.
+  const [modeShift, setModeShift] = useState<{ id: number; to: LauncherMode } | null>(() => ({
+    id: 0,
+    to: location.pathname === "/" || location.pathname === "/smp" ? "smp" : "classic",
+  }));
 
   useEffect(() => {
+    if (startupRedirect.current) {
+      if (location.pathname === "/") return;
+      startupRedirect.current = false;
+    }
     if (location.pathname === displayed.pathname) {
       setDisplayed(location);
+      return;
+    }
+    // Passage entre Nexora SMP et le launcher classique : la page change sous la transition.
+    const toSmp = location.pathname === "/smp";
+    if (toSmp !== (displayed.pathname === "/smp") && !document.hidden) {
+      setModeShift({ id: Date.now(), to: toSmp ? "smp" : "classic" });
       return;
     }
     setLeaving(true);
@@ -129,7 +151,7 @@ function AppShell() {
             paused={!!runningId}
             mode={sceneMode}
             weatherEnabled={weather}
-            biome={biome}
+            biome={displayed.pathname === "/smp" ? "christmas" : biome}
             calm={!isPlay}
             className="absolute inset-0 w-full h-full"
           />
@@ -190,6 +212,17 @@ function AppShell() {
       <UpdatePrompt />
       <Toasts />
       {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
+      {modeShift && (
+        <ModeTransition
+          id={modeShift.id}
+          to={modeShift.to}
+          onCovered={() => {
+            document.getElementById("splash")?.remove();
+            setDisplayed(latestLocation.current);
+          }}
+          onDone={() => setModeShift(null)}
+        />
+      )}
     </div>
   );
 }

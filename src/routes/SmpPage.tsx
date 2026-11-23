@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AccountSkin3D } from "../components/AccountSkin";
+import { ChristmasCountdown } from "../components/ChristmasSeason";
 import { Dropdown, Icon, ProgressBar, Spinner, progressPercent } from "../components/ui";
 import { api } from "../lib/api";
 import type { Renderer, Server, ServerStatus } from "../lib/types";
@@ -77,16 +78,20 @@ export function SmpPage() {
               {online ? `${status?.players_online ?? 0} / ${status?.players_max ?? 0} joueurs en ligne` : "Serveur officiel"}
             </div>
             <h1
-              className="text-[52px] leading-[1.05] font-extrabold tracking-[-0.02em]"
+              className="relative text-[52px] leading-[1.05] font-extrabold tracking-[-0.02em]"
               style={{ fontFamily: "var(--font-display)" }}
             >
               Nexora{" "}
-              <span className="bg-gradient-to-r from-accent to-cyan bg-clip-text text-transparent pb-1">SMP</span>
+              <span className="bg-gradient-to-r from-[#ff4d5a] via-[#ffd27a] to-[#3ddc84] bg-clip-text text-transparent pb-1">
+                SMP
+              </span>
             </h1>
             <p className="text-text-muted mt-3">
               Clique sur Jouer : le launcher prépare tout et te connecte directement au serveur.
             </p>
           </div>
+
+          <ChristmasCountdown />
 
           {!account ? (
             <Link to="/account" className="btn btn-primary btn-shine self-start">

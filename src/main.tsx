@@ -10,10 +10,11 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </React.StrictMode>,
 );
 
-// L'écran de démarrage (dans index.html) s'efface une fois l'interface affichée.
-requestAnimationFrame(() => {
+// L'écran de démarrage (dans index.html) est retiré par la transition d'ouverture, dans App.
+// Filet de sécurité : si l'interface n'a pas pu démarrer, il ne reste pas affiché indéfiniment.
+setTimeout(() => {
   const splash = document.getElementById("splash");
   if (!splash) return;
   splash.classList.add("splash-hide");
   setTimeout(() => splash.remove(), 450);
-});
+}, 6000);
