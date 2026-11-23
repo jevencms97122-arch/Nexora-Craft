@@ -12,6 +12,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/Toasts";
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { TitleBar } from "./components/TitleBar";
+import { VideoBackground } from "./components/VideoBackground";
 import { PlayPage } from "./routes/PlayPage";
 import { SmpPage } from "./routes/SmpPage";
 
@@ -41,6 +42,12 @@ function AppShell() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Les comptes sont lus dès le démarrage : la page Nexora SMP n'a pas de menu qui s'en charge.
+  const refreshAccounts = useAccountStore((s) => s.refresh);
+  useEffect(() => {
+    refreshAccounts().catch(() => {});
+  }, [refreshAccounts]);
 
   useEffect(() => {
     trackLaunch();
@@ -92,6 +99,7 @@ function AppShell() {
     location.pathname === "/" ? { ...location, pathname: "/smp" } : location,
   );
   const [leaving, setLeaving] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
   const startupRedirect = useRef(location.pathname === "/");
   const latestLocation = useRef(location);
   latestLocation.current = location;
@@ -143,6 +151,13 @@ function AppShell() {
       <div className="fixed inset-0">
         {image ? (
           <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${image})` }} />
+        ) : displayed.pathname === "/smp" && !videoFailed ? (
+          <VideoBackground
+            src="/videos/smp-background.mp4"
+            paused={!!runningId}
+            onError={() => setVideoFailed(true)}
+            className="absolute inset-0 w-full h-full"
+          />
         ) : (
           // L'animation est mise en pause pendant une partie pour laisser le GPU au jeu.
           <MinecraftScene
