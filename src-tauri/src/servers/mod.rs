@@ -56,7 +56,7 @@ impl Renderer {
 pub fn is_official_instance_name(name: &str) -> bool {
     name == OFFICIAL_NAME || name == OFFICIAL_VULKAN_NAME
 }
-const OFFICIAL_ADDRESS: &str = "game06-dc02.ouiheberg.com:8756";
+const OFFICIAL_ADDRESS: &str = "nexora-smp.fr";
 /// Pack officiel du serveur, sous forme de code de partage (version, loader, mods et shaders).
 /// L'instance « Nexora-SMP » est créée à partir de lui. Pour publier un nouveau pack : génère un
 /// code depuis une instance (« Partager par code ») et remplace celui-ci ; les instances déjà
@@ -177,6 +177,56 @@ pub fn split_address(address: &str) -> (String, u16) {
     }
 }
 
+/// Hôte et port réellement joints pour une adresse. Sans port explicite, l'enregistrement DNS
+/// `_minecraft._tcp.<hôte>` (SRV) est suivi comme le fait le jeu : « nexora-smp.fr » mène ainsi au
+/// vrai serveur. Sans SRV, le port par défaut de Minecraft est utilisé.
+async fn resolve_address(address: &str) -> (String, u16) {
+    let explicit_port = address.rsplit_once(':').is_some_and(|(_, port)| port.parse::<u16>().is_ok());
+    if !explicit_port {
+        let host = address.to_string();
+        if let Ok(Some(target)) = tokio::task::spawn_blocking(move || srv_lookup(&host)).await {
+            return target;
+        }
+    }
+    split_address(address)
+}
+
+/// Enregistrement SRV Minecraft d'un nom de domaine (cible et port), via le DNS de Windows.
+#[cfg(windows)]
+fn srv_lookup(host: &str) -> Option<(String, u16)> {
+    use windows::core::PCWSTR;
+    use windows::Win32::NetworkManagement::Dns::{
+        DnsFree, DnsFreeRecordList, DnsQuery_W, DNS_QUERY_STANDARD, DNS_RECORDA, DNS_RECORDW, DNS_TYPE_SRV,
+    };
+    let name: Vec<u16> = format!("_minecraft._tcp.{host}").encode_utf16().chain(Some(0)).collect();
+    let mut results: *mut DNS_RECORDA = std::ptr::null_mut();
+    unsafe {
+        let status = DnsQuery_W(PCWSTR(name.as_ptr()), DNS_TYPE_SRV, DNS_QUERY_STANDARD, None, &mut results, None);
+        if status.0 != 0 || results.is_null() {
+            return None;
+        }
+        let mut found = None;
+        let mut record = results as *const DNS_RECORDW;
+        while !record.is_null() {
+            if (*record).wType == DNS_TYPE_SRV.0 {
+                let srv = (*record).Data.SRV;
+                if let Ok(target) = srv.pNameTarget.to_string() {
+                    found = Some((target.trim_end_matches('.').to_string(), srv.wPort));
+                    break;
+                }
+            }
+            record = (*record).pNext;
+        }
+        DnsFree(Some(results as *const core::ffi::c_void), DnsFreeRecordList);
+        found
+    }
+}
+
+#[cfg(not(windows))]
+fn srv_lookup(_host: &str) -> Option<(String, u16)> {
+    None
+}
+
 fn write_varint(buf: &mut Vec<u8>, mut value: u32) {
     loop {
         let byte = (value & 0x7f) as u8;
@@ -234,7 +284,7 @@ fn strip_formatting(text: &str) -> String {
 
 /// Interroge un serveur avec le protocole « Server List Ping » de Minecraft.
 async fn query(address: &str) -> AppResult<ServerStatus> {
-    let (host, port) = split_address(address);
+    let (host, port) = resolve_address(address).await;
     let started = Instant::now();
     let mut stream = TcpStream::connect((host.as_str(), port)).await?;
 
